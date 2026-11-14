@@ -1,0 +1,15 @@
+# پروفایل ماندگار مرورگر (کوکی‌های اکانت DeepSeek) — هرگز کامیت نشود
+.deepseek_profile/
+
+# متغیرهای محیطی محلی (اگر کسی GH_TOKEN را محلی گذاشت)
+.env
+
+# پایتون
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# سیستم
+.DS_Store
