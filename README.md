@@ -1,162 +1,146 @@
-# DeepSeek × GitHub Agent
+# DevX — ایجنت خودمختار DeepSeek × GitHub
 
-ایجنت خودمختار پایتون که با **اکانت chat.deepseek.com** (از طریق Playwright) گفت‌وگو می‌کند و هنگام راه‌اندازی یک **GitHub Classic Token** از کاربر می‌گیرد تا روی حساب گیت‌هاب متناظرِ آن توکن عملیات گسترده (مدیریت مخازن، Issues، Pull Requestها، Actions و...) انجام دهد.
+ایجنت پایتون حرفه‌ای که با **اکانت chat.deepseek.com** (Playwright) گفت‌وگو می‌کند و با **GitHub Classic Token** روی حساب گیت‌هاب شما عملیات گسترده انجام می‌دهد — با **حافظهٔ ماندگار**، **یادگیری مهارت**، **۳۷ ابزار پلاگین‌پذیر** و **رابط وب HUD به نام DevX** با تم قرمز-مشکی و اکسنت‌های فیروزه‌ای/زرد و افکت‌های چشمک‌زن.
 
-مدل DeepSeek نقش «مغز تصمیم‌گیر» را دارد: شِمای همهٔ ابزارها را می‌بیند و خودش تصمیم می‌گیرد کدام ابزار را با چه آرگومان‌هایی صدا بزند؛ نتیجهٔ هر اجرا به او برمی‌گردد تا پاسخ نهایی ساخته شود.
+```
+  ██████╗ ███████╗██╗   ██╗██╗  ██╗
+  ██╔══██╗██╔════╝██║   ██║╚██╗██╔╝
+  ██║  ██║█████╗  ██║   ██║ ╚███╔╝
+  ██║  ██║██╔══╝  ╚██╗ ██╔╝ ██╔██╗
+  ██████╔╝███████╗ ╚████╔╝ ██╔╝ ██╗
+  ╚═════╝ ╚══════╝  ╚═══╝  ╚═╝  ╚═╝
+```
+
+## چه چیزهایی دارد که ایجنت‌های معمولی ندارند؟
+
+| قابلیت | توضیح |
+|---|---|
+| 🧠 **حافظهٔ ماندگار** | حقایق کاربر/پروژه، درس‌های خطا، یادداشت‌ها و تاریخچهٔ تسک‌ها در `memory/memory.json` ذخیره می‌شود؛ ابتدای هر تسک، حافظهٔ مرتبط (جستجوی کلیدواژه‌ای تطبیق‌پذیر با فارسی) به پرامپت تزریق می‌شود — **همه چیز را یادش می‌ماند** |
+| 🧰 **یادگیری مهارت** | بعد از هر تسک موفق، مدل یک «مهارت قابل‌استفادهٔ مجدد» استخراج می‌کند (پروتکل DISTILL) و در `skills_learned/*.md` ذخیره می‌شود؛ با هر استفاده، آمار usage/success به‌روز و مهارت‌های مرتبط در تسک‌های بعدی تزریق می‌شوند — **در طول کار اسکیل یاد می‌گیرد** |
+| 📚 **درس‌آموزی از خطا** | اگر ابزاری خطا داد، پایان تسک یک درس اکشن‌پذیر در حافظه ثبت می‌شود تا همان اشتباه تکرار نشود |
+| 📡 **رویدادمحور (Event-driven)** | موتور ایجنت هر دور/ابزار/نتیجه را به‌صورت رویداد منتشر می‌کند؛ هم CLI و هم وب از یک موتور مشترک استفاده می‌کنند |
+| 🖥️ **رابط وب DevX** | داشبورد HUD زنده: استریم SSE، خط‌زمانی ابزارها، پنل حافظه، مرورگر مهارت‌ها، وضعیت گیت‌هاب، اثر ماشین‌نویس، رادار، LEDهای چشمک‌زن |
+| 🧩 **پلاگین‌پذیری کامل** | رجیستری ابزار با JSON-Schema؛ افزودن ابزار جدید بدون دست زدن به موتور (سبک morx-gms2-mcp) |
+| 🔁 **مغز-مستقل (Brain-agnostic)** | هر کلاینتی با `send/wait_response/new_chat` می‌تواند مغز باشد (دیپ‌سیک اکنون؛ FakeBrain برای تست؛ API رسمی در آینده) |
+| 🛡️ **امنیت توکن** | توکن فقط با `getpass` یا مودال UI گرفته می‌شود، با `GET /user` اعتبارسنجی و **فقط در حافظهٔ همان اجرا** نگه داشته می‌شود |
 
 ---
 
 ## معماری
 
 ```
-کاربر ──تسک──▶ agent.py (حلقهٔ ایجنت، حداکثر MAX_ROUNDS دور)
-                 │
-                 ├─▶ deepseek_client.py  ──Playwright persistent──▶ chat.deepseek.com
-                 │        (textarea#chat-input / Enter / .ds-markdown--block)
-                 │
-                 ├─▶ system_prompt.py  (پرامپت سیستمی + پروتکل JSON)
-                 │
-                 └─▶ tool_registry.py  (رجیستری پلاگین‌پذیر ابزارها)
-                          ├─▶ github_tools.py   (۲۹ ابزار گیت‌هاب، PyGithub 2.x)
-                          ├─▶ builtin_tools.py  (ابزارهای نمونهٔ غیرگیت‌هابی)
-                          └─▶ [پلاگین بعدی شما: web_tools، fs_tools، ...]
+                    ┌────────────────────────── DevX Web UI ─────────────────────────┐
+                    │  ui/index.html — تم قرمز/مشکی + فیروزه‌ای/زرد، چشمک‌زن          │
+                    └───────────────▲────────────────────────────────────────────────┘
+                                    │ SSE (استریم زنده) + REST
+┌─────────────┐  تسک   ┌────────────┴─────────┐  رویداد   ┌────────────────────┐
+│ کاربر (CLI  ├───────▶│   server.py (DevX)   │◀──────────┤ agent_loop.py      │
+│ یا وب DevX) │        │   SSE + API + state  │           │ AgentEngine        │
+└─────────────┘        └──────────┬───────────┘           │ + EventBus         │
+                                  │                       │ + یادگیری خودکار   │
+                       ┌──────────▼───────────┐           └──┬───────┬─────────┘
+                       │ deepseek_client.py   │              │       │
+                       │ Playwright persistent│        ┌─────▼──┐ ┌──▼──────────┐
+                       │ context + اکانت      │        │memory.py│ │ skills.py   │
+                       │ chat.deepseek.com    │        │حافظه JSON│ │مهارت‌ها .md │
+                       └──────────────────────┘        └────────┘ └─────────────┘
+                                                  ┌──────────────────────────┐
+                                                  │ tool_registry.py         │
+                                                  │ ├ github_tools.py (۲۹)   │
+                                                  │ ├ memory/skill tools (۵) │
+                                                  │ └ builtin_tools.py (۲)   │
+                                                  └──────────────────────────┘
 ```
 
-**پروتکل ابزار:** چون وب‌چت دیپ‌سیک Function Calling ندارد، مدل فقط این JSON را می‌فرستد:
-`{"tool": "<نام>", "arguments": {...}}` — نتیجه با پیشوند `TOOL_RESULT` به همان گفت‌وگو برمی‌گردد. وقتی کار تمام شد مدل `{"final_answer": "..."}` می‌فرستد. اگر مدل در ۱۰ دور به جواب نهایی نرسد، حلقه متوقف می‌شود تا از حلقهٔ بی‌پایان جلوگیری شود.
+**پروتکل ابزار (چرخهٔ ایجنت):** مدل فقط `{"tool": "...", "arguments": {...}}` می‌فرستد → ابزار اجرا → نتیجه با پیشوند `TOOL_RESULT` برمی‌گردد → تا `{"final_answer": "..."}` یا سقف `MAX_ROUNDS` (پیش‌فرض ۱۰).
+
+**چرخهٔ یادگیری:** پایان تسک موفق → `META/DISTILL` به همان گفت‌وگو → JSON مهارت → ذخیره در کتابخانه → تسک‌های بعدی مشابه، ابتدا مهارت مرتبط را در پرامپت می‌بینند.
 
 ---
 
-## نصب
+## نصب و اجرا
 
-پیش‌نیاز: Python 3.10+ (به‌خاطر `zoneinfo`)
+پیش‌نیاز: Python 3.10+
 
 ```bash
 pip install -r requirements.txt
-playwright install chromium          # دانلود مرورگر کرومیوم برای Playwright
-cp .env.example .env                 # و اگر خواستی مسیر پروفایل/زمان‌ها را تنظیم کن
+playwright install chromium        # مرورگر کرومیوم
+cp .env.example .env               # تنظیمات (اختیاری)
 ```
 
-## اجرا
+### رابط وب DevX (پیشنهادی)
 
 ```bash
-python agent.py                    # حالت تعاملی (REPL)
-python agent.py "در مخزن agent یک Issue بساز با عنوان ..."   # حالت تک‌تسک
-python agent.py --tools            # فقط فهرست ابزارها (بدون باز کردن مرورگر)
+python devx.py                     # → http://127.0.0.1:8770 (باز شدن خودکار)
+python devx.py --port 9000         # پورت دلخواه
+python devx.py --no-browser        # فقط سرور
 ```
 
-دستورات داخل REPL:
+۱. صفحهٔ DevX باز می‌شود؛ مودال توکن گیت‌هاب ظاهر می‌شود → توکن `ghp_` را بده (اعتبارسنجی با `GET /user`) یا «فعلاً نه» را بزن.
+۲. اگر اکانت دیپ‌سیک لاگین نباشد، **نوار هشدار چشمک‌زن** بالای صفحه می‌آید → دکمهٔ «باز کردن پنجرهٔ ورود» → در پنجرهٔ کرومیوم دستی وارد شو (یک‌بار برای همیشه، پروفایل ماندگار است).
+۳. LED وضعیت `DEEPSEEK` فیروزه‌ای و پالس‌دار می‌شود → تسک بده.
 
-| دستور | کار |
-|---|---|
-| `/tools` | نمایش فهرست ابزارهای فعال |
-| `/newchat` | شروع گفت‌وگوی تازه در دیپ‌سیک |
-| `/exit` یا `/quit` | خروج |
+### حالت ترمینال (CLI)
 
-### ورود به اکانت DeepSeek
+```bash
+python agent.py                    # REPL تعاملی (توکن با getpass)
+python agent.py "تسک مورد نظر"     # تک‌تسک
+python agent.py --tools            # فقط فهرست ابزارها
+```
 
-اولین اجرا: پنجرهٔ کرومیوم باز می‌شود (`DEEPSEEK_HEADLESS=false`) و ایجنت صبر می‌کند تا **دستی** وارد اکانت شوی. پروفایل کرومیوم در مسیر ثابت `DEEPSEEK_USER_DATA_DIR` (از `.env`) ذخیره می‌شود (`playwright.chromium.launch_persistent_context`)، پس اجراهای بعدی بدون لاگین دوباره ادامه می‌دهند.
-
-تشخیص لاگین: اگر `input[type="tel"]` یا `input[placeholder*="Phone"]` در صفحه باشد یعنی صفحهٔ ورود است؛ اگر `textarea#chat-input` باشد یعنی لاگین هستی.
+دستورات REPL: `/tools` `/memory` `/skills` `/stats` `/newchat` `/exit`
 
 ---
 
 ## گرفتن GitHub Classic Token
 
-۱. برو به **https://github.com/settings/tokens** → `Generate new token` → `Generate new token (classic)`
-۲. توضیح بگذار و اسکوپ‌ها را انتخاب کن:
+۱. **https://github.com/settings/tokens** → `Generate new token (classic)`
+۲. اسکوپ‌ها:
 
 | اسکوپ | برای چه |
 |---|---|
-| `repo` | **حداقلِ لازم** — مخازن عمومی/پرایوت: کد، Issues، PRها، Releases |
-| `workflow` | ساخت/ویرایش `.github/workflows` و اجرای Actions |
-| `delete_repo` | فقط اگر ابزار `delete_repo` را می‌خواهی (پیش‌فرض نیست) |
+| `repo` | **حداقل لازم** — مخازن عمومی/پرایوت: کد، Issues، PR، Release |
+| `workflow` | ساخت/ویرایش و اجرای Actions |
+| `delete_repo` | فقط برای ابزار `delete_repo` (پیش‌فرض نیست) |
 
-۳. توکن با پیشوند `ghp_` ساخته می‌شود؛ هنگام اجرای برنامه با `getpass()` واردش کن (در ترمینال نمایش داده نمی‌شود).
-
-**اعتبارسنجی:** توکن با یک درخواست ساده به `GET https://api.github.com/user` بررسی می‌شود؛ اگر نام کاربری برگردد معتبر است و برای تأیید نمایش داده می‌شود. اگر ۴۰۱ برگشت، پیام واضح «توکن نامعتبر» می‌گیری و می‌توانی دوباره وارد کنی (تا ۳ تلاش).
-
-**هشدار امنیتی:** توکن کلاسیک به‌طور پیش‌فرض به منابع **سازمان‌ها** هم دسترسی دارد، مگر اینکه سازمان با SSO/سیاست‌های توکن آن را محدود کرده باشد؛ پس با احتیاط بساز، فقط لازم را بده و پس از کار حذفش کن. توکن **فقط در حافظهٔ همان اجرا** نگه داشته می‌شود و هرگز در فایل، لاگ یا کد ذخیره نمی‌شود.
+۳. ⚠️ توکن کلاسیک به‌طور پیش‌فرض به منابع **سازمان‌ها** هم دسترسی دارد (مگر سازمان محدودش کرده باشد) — با احتیاط بساز و پس از کار حذف کن.
+۴. 🔒 توکن فقط در حافظهٔ همان اجرا می‌ماند (CLI: `getpass`، وب: مودال + POST به سرور محلی خودت)؛ هرگز در فایل/لاگ/کد ذخیره نمی‌شود.
 
 ---
 
-## ابزارها (۲۹ گیت‌هابی + ۲ داخلی)
+## ابزارها (۳۷)
 
-### فقط‌خواندنی
+**گیت‌هاب (۲۹ با PyGithub 2.x و الگوی `Auth.Token`):**
+فقط‌خواندنی: `get_authenticated_user` `get_rate_limit` `list_repos` `get_repo` `get_repo_status` `list_branches` `get_file_contents` `list_repo_files` `list_issues` `get_issue` `list_pull_requests` `get_pull_request_status` `list_commits` `list_workflows` `get_workflow_runs` `search_repositories`
+نوشتنی: `create_repo` `create_or_update_file` `create_branch` `create_issue` `comment_on_issue` `update_issue_state` `create_pull_request` `comment_on_pr` `merge_pull_request` `create_release` `trigger_workflow` `fork_repo` `delete_repo ⚠️`
 
-| ابزار | کار |
-|---|---|
-| `get_authenticated_user` | لاگین و مشخصات صاحب توکن + اسکوپ‌های توکن |
-| `get_rate_limit` | سهمیهٔ باقی‌ماندهٔ API (عیب‌یابی ۴۰۳) |
-| `list_repos` | فهرست مخازن (مالک/همکار/سازمان) |
-| `get_repo` | متادیتای کامل مخزن |
-| `get_repo_status` | وضعیت لحظه‌ای: شاخه‌ها، ۵ کامیت آخر، آخرین اجرای Actions |
-| `list_branches` / `list_repo_files` / `get_file_contents` | شاخه‌ها، فایل‌ها، محتوای فایل |
-| `list_issues` / `get_issue` | فهرست و جزئیات Issueها |
-| `list_pull_requests` / `get_pull_request_status` | فهرست PRها؛ وضعیت mergeable و CI |
-| `list_commits` | کامیت‌های اخیر |
-| `list_workflows` / `get_workflow_runs` | workflowها و اجراهای Actions |
-| `search_repositories` | جستجوی سراسری مخازن |
+**حافظه (۳):** `save_memory` `search_memory` `list_recent_tasks`
+**مهارت (۳):** `save_skill` `list_skills` `get_skill`
+**داخلی (۲):** `get_current_time` `echo`
 
-### نوشتنی
-
-| ابزار | کار |
-|---|---|
-| `create_repo` | ساخت مخزن جدید |
-| `create_or_update_file` | ساخت/به‌روزرسانی فایل با یک کامیت |
-| `create_branch` | ساخت شاخهٔ جدید |
-| `create_issue` / `comment_on_issue` / `update_issue_state` | ساخت Issue، کامنت، بستن/بازگشایی |
-| `create_pull_request` / `comment_on_pr` / `merge_pull_request` | ساخت PR، کامنت روی PR، ادغام (merge/squash/rebase) |
-| `create_release` | ساخت Release روی تگ |
-| `trigger_workflow` | اجرای دستی workflow (نیازمند اسکوپ `workflow`) |
-| `fork_repo` | فورک گرفتن |
-| `delete_repo` ⚠️ | حذف دائمی — فقط با `confirm=true` و اسکوپ `delete_repo` |
-
-### داخلی (نمونهٔ پلاگین‌پذیری)
-
-`get_current_time`، `echo`
-
----
-
-## افزودن ابزار جدید (الگوی پلاگین)
-
-الگو همان سبک ابزارمحور سرورهایی مثل **morx-gms2-mcp** است: ده‌ها ابزار با شِما به مدل داده می‌شود و حلقهٔ ایجنت عمومی است. برای افزودن ابزار جدید (مثلاً جستجوی وب) هیچ تغییری در `agent.py` لازم نیست — یک ماژول بساز، ثبت کن:
+## افزودن ابزار جدید (پلاگین)
 
 ```python
 # web_tools.py
-from tool_registry import ToolRegistry
-
-def register_web_tools(registry: ToolRegistry, ...) -> None:
-    @registry.register(
-        name="web_search",
-        description="Search the web and return results",
-        parameters={
-            "type": "object",
-            "properties": {"query": {"type": "string"}},
-            "required": ["query"],
-        },
-    )
+def register_web_tools(registry) -> None:
+    @registry.register(name="web_search", description="Search the web",
+                       parameters={"type":"object","properties":{"query":{"type":"string"}},"required":["query"]})
     def web_search(query: str) -> dict:
-        ...  # پیاده‌سازی؛ خروجی حتماً dict (JSON-سازگار)
         return {"results": [...]}
 
-# سپس فقط در agent.py → build_registry یک خط اضافه کن:
-#   from web_tools import register_web_tools
-#   register_web_tools(registry)
+# سپس فقط یک خط در server.py→_make_registry یا agent.py→build_registry:
+register_web_tools(registry)
 ```
-
-قواعد ابزار: ورودی‌ها دقیقاً هم‌نام با `properties` شِما (فراخوانی `func(**arguments)`)، خروجی `dict`، و برای عملیات خطرناک پارامتر تأیید صریح مثل `confirm=true`. اگر ابزاری خطا بدهد، رجیستری آن را به‌شکل `{"ok": false, "error": ...}` به مدل برمی‌گرداند و برنامه نمی‌میرد.
 
 ---
 
 ## تست‌ها
 
 ```bash
-# ایستا (بدون شبکه): ایمپورت‌ها، شِمای ۳۱ ابزار، پارسر پروتکل، کوتاه‌سازی خروجی
-python tests/test_static.py
-
-# فقط‌خواندنی با API واقعی — هیچ داده‌ای ساخته/حذف نمی‌شود:
-GH_TOKEN=ghp_xxx python tests/test_github_readonly.py
+python tests/test_static.py          # ایستا: ایمپورت‌ها + شِمای ۳۷ ابزار + پارسر
+python tests/test_devx_core.py       # آفلاین: حافظه/مهارت/موتور با FakeBrain + یادگیری
+python tests/test_server_smoke.py    # سرور واقعی: UI + API + SSE + جریان کامل تسک
+GH_TOKEN=ghp_xxx python tests/test_github_readonly.py   # فقط‌خواندنی با API واقعی
 ```
 
 ---
@@ -165,36 +149,40 @@ GH_TOKEN=ghp_xxx python tests/test_github_readonly.py
 
 ```
 agent/
-├── agent.py              ← نقطهٔ ورود: دریافت توکن (getpass) + REPL + حلقهٔ ایجنت
-├── deepseek_client.py    ← Playwright persistent context، تشخیص/انتظار لاگین، ارسال/دریافت پیام
-├── tool_registry.py      ← رجیستری پلاگین‌پذیر + اجرای امن ابزارها
-├── github_tools.py       ← GitHubTools (PyGithub 2.x, Auth.Token) + ثبت ۲۹ ابزار
-├── builtin_tools.py      ← ابزارهای نمونهٔ غیرگیت‌هابی
-├── system_prompt.py      ← پرامپت سیستمی + parse_model_action
-├── config.py             ← پیکربندی از .env
-├── requirements.txt
-├── .env.example          ← نمونهٔ کامل تنظیمات (توکن اینجا نوشته نمی‌شود!)
-└── tests/
-    ├── test_static.py          ← تست ایستا بدون شبکه
-    └── test_github_readonly.py ← تست ابزارهای خواندنی با API واقعی
+├── devx.py              ← لانچر رابط وب DevX
+├── server.py            ← سرور محلی: SSE + REST API + state
+├── ui/index.html        ← رابط HUD (تک‌فایل، بدون build؛ قرمز/مشکی + فیروزه‌ای/زرد)
+├── agent.py             ← حالت CLI (همان موتور مشترک)
+├── agent_loop.py        ← AgentEngine: حلقهٔ رویدادمحور + یادگیری خودکار
+├── memory.py            ← حافظهٔ ماندگار (memory/memory.json) + جستجو + ابزارها
+├── skills.py            ← کتابخانهٔ مهارت (skills_learned/*.md) + انتخاب مرتبط + ابزارها
+├── deepseek_client.py   ← Playwright persistent context + ارسال/دریافت از DOM
+├── github_tools.py      ← ۲۹ ابزار گیت‌هاب (PyGithub 2.x, Auth.Token)
+├── builtin_tools.py     ← ابزارهای نمونهٔ غیرگیت‌هابی
+├── tool_registry.py     ← رجیستری پلاگین‌پذیر با JSON-Schema
+├── system_prompt.py     ← پرامپت سیستمی + پارسر پروتکل
+├── config.py            ← پیکربندی از .env
+└── tests/               ← ایستا + هستهٔ DevX + دود سرور + فقط‌خواندنی واقعی
 ```
 
-## تنظیمات `.env`
+## تنظیمات کلیدی `.env`
 
 | کلید | پیش‌فرض | توضیح |
 |---|---|---|
-| `DEEPSEEK_URL` | `https://chat.deepseek.com/` | آدرس چت |
-| `DEEPSEEK_USER_DATA_DIR` | `./.deepseek_profile` | پروفایل ماندگار اکانت (از `.env`) |
-| `DEEPSEEK_HEADLESS` | `false` | برای ورود اول باید `false` باشد |
+| `DEEPSEEK_USER_DATA_DIR` | `./.deepseek_profile` | پروفایل ماندگار اکانت دیپ‌سیک |
 | `MAX_ROUNDS` | `10` | سقف دورهای ابزار در هر تسک |
+| `DEVX_PORT` | `8770` | پورت رابط وب |
+| `MEMORY_DIR` | `./memory` | محل حافظهٔ ماندگار |
+| `SKILLS_DIR` | `./skills_learned` | کتابخانهٔ مهارت‌های آموخته‌شده |
+| `AUTO_LEARN_SKILL` | `true` | یادگیری مهارت پس از تسک موفق |
+| `AUTO_LEARN_LESSON` | `true` | ثبت درس پس از خطای ابزار |
 | `RESPONSE_TIMEOUT` | `240` | مهلت انتظار پاسخ دیپ‌سیک (ثانیه) |
-| `TOKEN_MAX_ATTEMPTS` | `3` | تلاش‌های مجاز ورود توکن |
-| `TOOL_RESULT_MAX_CHARS` | `20000` | سقف حجم خروجی هر ابزار |
 
 ## عیب‌یابی
 
-- **«textarea#chat-input پیدا نشد»** → اگر دیپ‌سیک UI را تغییر داده باشد، سلکتورها در `deepseek_client.py` (ثابت‌های کلاس) را به‌روز کن.
-- **پاسخ ناقص** → `RESPONSE_TIMEOUT` یا `RESPONSE_STABLE_CHECKS` را در `.env` بیشتر کن.
-- **۴۰۳ گیت‌هاب** → با ابزار `get_rate_limit` سهمیه را ببین؛ یا اسکوپ توکن کم است.
-- **لاگین مکرر دیپ‌سیک** → فایل `.deepseek_profile` را پاک کن و یک‌بار با `DEEPSEEK_HEADLESS=false` وارد شو.
-- **اسکریپت‌های صفحه** → مرورگر با `--disable-blink-features=AutomationControlled` اجرا می‌شود؛ اگر باز هم مشکل بود، سرعت اجرای تسک‌ها را کمتر کن.
+- **نوار هشدار چشمک‌زن «لاگین دیپ‌سیک لازم است»** → دکمهٔ «باز کردن پنجرهٔ ورود» را بزن و در پنجرهٔ کرومیوم وارد شو؛ پروفایل ماندگار است و تکرار نمی‌شود. در `DEEPSEEK_HEADLESS=true` ورود دستی ممکن نیست.
+- **«textarea#chat-input پیدا نشد»** → UI دیپ‌سیک عوض شده؛ سلکتورها ثابت کلاس در `deepseek_client.py` هستند.
+- **پاسخ ناقص** → `RESPONSE_TIMEOUT` یا `RESPONSE_STABLE_CHECKS` را بالا ببر.
+- **۴۰۳ گیت‌هاب** → ابزار `get_rate_limit` یا پنل GitHub در DevX (سهمیه‌سنج).
+- **توکن گم شده بعد از ری‌استارت** → طبیعی است؛ توکن عمداً فقط حافظه است — دوباره در مودال بده.
+- **حافظهٔ خراب** → فایل `memory/memory.json.corrupt.bak` بکاپ می‌شود و ایجنت از نو شروع می‌کند.

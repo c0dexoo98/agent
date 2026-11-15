@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DevX — DeepSeek × GitHub Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════════════════════════════
+   DevX UI — تم قرمز/مشکی + اکسنت فیروزه‌ای و زرد، افکت‌های چشمک‌زن
+   ═══════════════════════════════════════════════════════════════════ */
+:root{
+  --bg:#060609; --bg2:#0b0709; --panel:#100a0d; --panel2:#150d10;
+  --line:rgba(255,45,74,.22); --line-strong:rgba(255,45,74,.55);
+  --red:#ff2b4a; --red-deep:#8a1024; --red-dark:#3d0a14;
+  --teal:#3ee6cf; --teal-dim:rgba(62,230,207,.14);
+  --yellow:#ffd23f; --yellow-dim:rgba(255,210,63,.12);
+  --text:#ece7ea; --muted:#94868c; --faint:#5e5357;
+  --ok:#3ee68f; --err:#ff5566;
+  --mono:'JetBrains Mono',Consolas,monospace;
+  --fa:'Vazirmatn',Tahoma,'Segoe UI',sans-serif;
+  --r:14px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:
+    radial-gradient(1100px 500px at 85% -10%, rgba(255,43,74,.10), transparent 60%),
+    radial-gradient(900px 420px at 10% 110%, rgba(62,230,207,.06), transparent 60%),
+    var(--bg);
+  color:var(--text); font-family:var(--fa); font-size:14px;
+  min-height:100vh; overflow-x:hidden;
+}
+::selection{background:rgba(255,43,74,.35)}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-track{background:var(--bg2)}
+::-webkit-scrollbar-thumb{background:var(--red-dark);border-radius:8px;border:1px solid var(--line)}
+::-webkit-scrollbar-thumb:hover{background:var(--red-deep)}
+
+/* ── انیمیشن‌های پایه ─────────────────────────────────────────────── */
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.18}}
+@keyframes softPulse{0%,100%{opacity:1;box-shadow:0 0 6px 1px currentColor}50%{opacity:.55;box-shadow:0 0 14px 3px currentColor}}
+@keyframes scan{0%{transform:translateX(-110%)}100%{transform:translateX(110%)}}
+@keyframes radar{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
+@keyframes breathe{0%,100%{box-shadow:0 0 18px rgba(255,43,74,.25), inset 0 0 22px rgba(255,43,74,.06)}50%{box-shadow:0 0 30px rgba(255,43,74,.5), inset 0 0 30px rgba(255,43,74,.12)}}
+@keyframes glitch{
+  0%,86%,100%{transform:none;clip-path:none;filter:none}
+  88%{transform:translate(1px,-1px);text-shadow:-2px 0 var(--teal),2px 0 var(--red)}
+  90%{transform:translate(-2px,1px);text-shadow:2px 0 var(--yellow),-2px 0 var(--red)}
+  92%{transform:translate(1px,0);text-shadow:-1px 0 var(--teal),1px 0 var(--red)}
+  94%{transform:none;text-shadow:none}
+}
+@keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes shake{10%,90%{transform:translateX(-1px)}20%,80%{transform:translateX(2px)}30%,50%,70%{transform:translateX(-4px)}40%,60%{transform:translateX(4px)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
+@keyframes caret{0%,100%{opacity:1}50%{opacity:0}}
+.blink{animation:blink 1.1s steps(1) infinite}
+.blink-fast{animation:blink .65s steps(1) infinite}
+@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+
+/* ── هدر ─────────────────────────────────────────────────────────── */
+header{
+  position:sticky;top:0;z-index:50;
+  background:linear-gradient(180deg,rgba(10,6,8,.96),rgba(10,6,8,.88));
+  border-bottom:1px solid var(--line);
+  backdrop-filter:blur(9px);
+  padding:12px 22px 10px;
+  display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+}
+header::after{ /* خط اسکن رد‌شونده */
+  content:"";position:absolute;bottom:-1px;right:0;height:2px;width:180px;
+  background:linear-gradient(90deg,transparent,var(--red),transparent);
+  animation:scan 3.2s linear infinite;opacity:.85;
+}
+.logo{display:flex;align-items:center;gap:12px}
+.logo-mark{
+  width:38px;height:38px;border-radius:10px;position:relative;flex:0 0 auto;
+  background:linear-gradient(145deg,var(--red-deep),var(--red-dark));
+  border:1px solid var(--line-strong);
+  display:grid;place-items:center;font-family:var(--mono);font-weight:700;font-size:15px;color:var(--yellow);
+  text-shadow:0 0 8px rgba(255,210,63,.6);
+}
+.logo-mark::before{content:"";position:absolute;inset:-5px;border-radius:14px;border:1px dashed rgba(255,43,74,.35);animation:radar 9s linear infinite}
+.logo h1{
+  font-size:24px;font-weight:800;letter-spacing:1px;font-family:var(--mono);direction:ltr;
+  color:var(--red); text-shadow:0 0 14px rgba(255,43,74,.55);
+  animation:glitch 6s infinite;
+}
+.logo small{display:block;color:var(--muted);font-size:11px;font-weight:400;letter-spacing:0}
+.chips{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-inline-start:auto}
+.chip{
+  display:flex;align-items:center;gap:7px;padding:5px 11px;border-radius:999px;
+  background:var(--panel);border:1px solid var(--line);font-size:12px;color:var(--muted);
+  transition:border-color .2s, color .2s;
+}
+.chip b{color:var(--text);font-family:var(--mono);font-weight:700}
+.chip .led{width:8px;height:8px;border-radius:50%;background:var(--faint);flex:0 0 auto}
+.chip.on{border-color:rgba(62,230,207,.45);color:var(--text)}
+.chip.on .led{background:var(--teal);color:var(--teal);animation:softPulse 2s ease-in-out infinite}
+.chip.warn{border-color:rgba(255,210,63,.5);color:var(--yellow)}
+.chip.warn .led{background:var(--yellow);color:var(--yellow);animation:blink 1s steps(1) infinite}
+.chip.err{border-color:rgba(255,43,74,.6);color:var(--red)}
+.chip.err .led{background:var(--red);color:var(--red);animation:blink .7s steps(1) infinite}
+.clock{font-family:var(--mono);color:var(--yellow);font-size:13px;letter-spacing:2px;direction:ltr;text-shadow:0 0 10px rgba(255,210,63,.4)}
+.live{
+  font-family:var(--mono);font-size:11px;color:var(--red);border:1px solid var(--line-strong);
+  padding:4px 10px;border-radius:6px;letter-spacing:2px;direction:ltr;
+  background:rgba(255,43,74,.08);animation:blink 1.4s steps(1) infinite;
+}
+
+/* ── نوار هشدار ──────────────────────────────────────────────────── */
+#alertBar{
+  display:none;align-items:center;gap:14px;flex-wrap:wrap;
+  margin:12px 22px 0;padding:12px 16px;border-radius:var(--r);
+  background:linear-gradient(90deg,rgba(255,43,74,.14),rgba(255,43,74,.05));
+  border:1px solid var(--line-strong); animation:breathe 2.4s ease-in-out infinite;
+}
+#alertBar.show{display:flex}
+#alertBar .dot{width:10px;height:10px;border-radius:50%;background:var(--red);animation:blink .8s steps(1) infinite;flex:0 0 auto}
+#alertBar b{color:var(--red)}
+#alertBar span{color:var(--text);font-size:13px}
+
+/* ── چیدمان اصلی ─────────────────────────────────────────────────── */
+main{display:grid;grid-template-columns:1fr 340px;gap:16px;padding:16px 22px;max-width:1560px;margin:0 auto}
+@media(max-width:1050px){main{grid-template-columns:1fr}}
+.side{display:flex;flex-direction:column;gap:16px;min-width:0}
+
+.panel{
+  background:linear-gradient(180deg,var(--panel),var(--panel2));
+  border:1px solid var(--line);border-radius:var(--r);overflow:hidden;
+  box-shadow:0 4px 24px rgba(0,0,0,.45);
+}
+.panel-h{
+  display:flex;align-items:center;gap:9px;padding:11px 14px;
+  border-bottom:1px solid var(--line);background:rgba(255,43,74,.05);
+}
+.panel-h h3{font-size:13px;font-weight:600;letter-spacing:.4px}
+.panel-h .cnt{
+  margin-inline-start:auto;font-family:var(--mono);font-size:11px;color:var(--teal);
+  border:1px solid rgba(62,230,207,.35);border-radius:6px;padding:2px 8px;direction:ltr;
+  background:var(--teal-dim);
+}
+.panel-h .icon{color:var(--yellow);font-size:14px;filter:drop-shadow(0 0 6px rgba(255,210,63,.5))}
+.panel-b{padding:12px 14px;max-height:330px;overflow-y:auto}
+.panel-b::-webkit-scrollbar-thumb{background:rgba(62,230,207,.25)}
+
+/* ── پنل حافظه ───────────────────────────────────────────────────── */
+.tabs{display:flex;gap:6px;padding:8px 12px 0;flex-wrap:wrap}
+.tab{
+  font-size:11px;padding:4px 10px;border-radius:7px;cursor:pointer;color:var(--muted);
+  border:1px solid transparent;background:transparent;transition:all .15s;
+}
+.tab.active{color:var(--yellow);border-color:rgba(255,210,63,.4);background:var(--yellow-dim)}
+.mem-item{
+  padding:8px 10px;border-radius:9px;margin-bottom:8px;font-size:12.5px;line-height:1.7;
+  background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.05);
+  border-inline-start:3px solid var(--red-deep);
+}
+.mem-item.lesson{border-inline-start-color:var(--yellow)}
+.mem-item.note{border-inline-start-color:var(--teal)}
+.mem-item .meta{color:var(--faint);font-size:10px;font-family:var(--mono);direction:ltr;display:block;margin-top:3px;text-align:left}
+
+/* ── پنل مهارت‌ها ────────────────────────────────────────────────── */
+.skill{
+  border:1px solid rgba(62,230,207,.22);border-radius:10px;padding:10px 12px;margin-bottom:9px;
+  background:linear-gradient(180deg,rgba(62,230,207,.06),transparent);
+}
+.skill h4{font-size:13px;color:var(--teal);font-family:var(--mono);direction:ltr;text-align:left;letter-spacing:.5px}
+.skill p{font-size:12px;color:var(--muted);margin:4px 0 6px;line-height:1.7}
+.skill .bars{display:flex;gap:10px;align-items:center}
+.bar{flex:1;height:5px;background:rgba(255,255,255,.06);border-radius:99px;overflow:hidden}
+.bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--teal),var(--yellow));transition:width .4s}
+.skill .num{font-family:var(--mono);font-size:10px;color:var(--faint);direction:ltr}
+
+/* ── پنل گیت‌هاب ─────────────────────────────────────────────────── */
+.gh-user{display:flex;gap:10px;align-items:center;margin-bottom:10px}
+.gh-avatar{width:38px;height:38px;border-radius:50%;border:2px solid var(--red);box-shadow:0 0 12px rgba(255,43,74,.4);background:var(--panel2)}
+.gh-user b{font-family:var(--mono);direction:ltr;display:block;color:var(--yellow)}
+.gh-user small{color:var(--muted);font-size:11px}
+.repo{
+  display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 10px;margin-bottom:7px;
+  border-radius:8px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.02);font-size:12px;
+}
+.repo b{font-family:var(--mono);direction:ltr;color:var(--text);font-size:11.5px}
+.repo .tag{font-size:10px;padding:2px 7px;border-radius:5px;font-family:var(--mono);direction:ltr}
+.tag.private{color:var(--red);border:1px solid rgba(255,43,74,.4);background:rgba(255,43,74,.08)}
+.tag.public{color:var(--teal);border:1px solid rgba(62,230,207,.35);background:var(--teal-dim)}
+
+/* ── پنل سیستم ───────────────────────────────────────────────────── */
+.sys{display:flex;flex-wrap:wrap;gap:7px}
+.sys .kv{
+  font-family:var(--mono);font-size:10.5px;direction:ltr;padding:4px 9px;border-radius:6px;
+  border:1px solid rgba(255,255,255,.08);color:var(--muted);background:rgba(255,255,255,.02);
+}
+.sys .kv b{color:var(--teal)}
+
+/* ── استریم تسک ──────────────────────────────────────────────────── */
+.stream{min-height:calc(100vh - 210px);display:flex;flex-direction:column;gap:12px}
+.card{
+  border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;
+  background:linear-gradient(180deg,var(--panel),var(--panel2));
+  animation:rise .3s ease-out;box-shadow:0 4px 20px rgba(0,0,0,.4);
+}
+.card.user{
+  border-color:rgba(255,210,63,.35);
+  background:linear-gradient(90deg,rgba(255,210,63,.08),transparent 40%);
+}
+.card.user .who{color:var(--yellow)}
+.card .who{
+  display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted);
+  margin-bottom:8px;letter-spacing:.5px;
+}
+.card .who .role{
+  font-family:var(--mono);padding:2px 9px;border-radius:5px;font-size:10px;direction:ltr;letter-spacing:1px;
+  border:1px solid var(--line);color:var(--red);background:rgba(255,43,74,.07);
+}
+.card .txt{line-height:1.9;white-space:pre-wrap;word-break:break-word;font-size:13.5px}
+
+.card.tool{
+  border-color:rgba(62,230,207,.3);
+  background:linear-gradient(90deg,rgba(62,230,207,.05),transparent 45%);
+  padding:10px 14px;
+}
+.card.tool .head{display:flex;align-items:center;gap:9px;cursor:pointer}
+.card.tool .icon{
+  width:26px;height:26px;border-radius:7px;display:grid;place-items:center;font-size:13px;flex:0 0 auto;
+  background:var(--teal-dim);border:1px solid rgba(62,230,207,.4);color:var(--teal);
+}
+.card.tool .icon.err{background:rgba(255,43,74,.1);border-color:rgba(255,43,74,.5);color:var(--red)}
+.card.tool .tname{font-family:var(--mono);color:var(--teal);direction:ltr;font-size:13px;letter-spacing:.3px}
+.card.tool.round-badge{margin-inline-start:auto}
+.card.tool .rno{font-family:var(--mono);font-size:10px;color:var(--faint);border:1px solid rgba(255,255,255,.1);border-radius:5px;padding:2px 7px;direction:ltr}
+.card.tool .status{margin-inline-start:auto;font-size:11px}
+.card.tool .status.run{color:var(--yellow);animation:blink .8s steps(1) infinite}
+.card.tool .status.ok{color:var(--ok)}
+.card.tool .status.fail{color:var(--err)}
+.card.tool .detail{display:none;margin-top:9px;border-top:1px dashed rgba(62,230,207,.25);padding-top:9px}
+.card.tool.open .detail{display:block}
+.card.tool pre{
+  font-family:var(--mono);font-size:11px;direction:ltr;text-align:left;color:#c9c2c6;
+  background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.06);border-radius:8px;
+  padding:9px 11px;overflow-x:auto;white-space:pre-wrap;word-break:break-word;line-height:1.7;
+}
+.spin{
+  width:13px;height:13px;border-radius:50%;flex:0 0 auto;display:inline-block;
+  border:2px solid rgba(255,210,63,.25);border-top-color:var(--yellow);
+  animation:spin .8s linear infinite;
+}
+
+.card.final{
+  border-color:rgba(62,230,207,.45);
+  background:linear-gradient(180deg,rgba(62,230,207,.07),transparent 60%);
+}
+.card.final .txt{color:#e6fbf6}
+.caret{
+  display:inline-block;width:9px;height:16px;background:var(--yellow);vertical-align:-2px;
+  margin-inline-start:3px;animation:caret 1s steps(1) infinite;
+  box-shadow:0 0 8px rgba(255,210,63,.7);
+}
+.toasts{
+  position:fixed;bottom:96px;inset-inline-start:22px;z-index:80;display:flex;flex-direction:column;gap:8px;max-width:340px;
+}
+.toast{
+  padding:10px 14px;border-radius:10px;font-size:12.5px;line-height:1.7;animation:rise .25s ease-out;
+  border:1px solid;box-shadow:0 6px 24px rgba(0,0,0,.5);
+}
+.toast.ok{background:rgba(62,230,143,.1);border-color:rgba(62,230,143,.45);color:var(--ok)}
+.toast.err{background:rgba(255,43,74,.1);border-color:rgba(255,43,74,.5);color:var(--err)}
+.toast.info{background:rgba(255,210,63,.08);border-color:rgba(255,210,63,.4);color:var(--yellow)}
+
+/* ── وضعیت خالی ──────────────────────────────────────────────────── */
+#empty{margin:auto;text-align:center;padding:60px 20px}
+.radar{
+  width:120px;height:120px;border-radius:50%;margin:0 auto 22px;position:relative;
+  border:1px solid var(--line);background:radial-gradient(circle,rgba(255,43,74,.06),transparent 70%);
+}
+.radar::before,.radar::after{
+  content:"";position:absolute;border-radius:50%;border:1px solid rgba(255,43,74,.25);
+}
+.radar::before{inset:22px}
+.radar::after{inset:44px;border-color:rgba(62,230,207,.35)}
+.radar .beam{
+  position:absolute;inset:0;border-radius:50%;overflow:hidden;
+  background:conic-gradient(from 0deg,rgba(62,230,207,.28),transparent 70deg,transparent 360deg);
+  animation:radar 3.4s linear infinite;
+}
+.radar .core{position:absolute;top:50%;left:50%;width:8px;height:8px;margin:-4px;border-radius:50%;background:var(--red);box-shadow:0 0 12px var(--red);animation:softPulse 1.6s infinite;color:var(--red)}
+#empty h2{color:var(--text);font-size:17px;font-weight:600;margin-bottom:8px}
+#empty p{color:var(--muted);font-size:12.5px;margin-bottom:18px}
+#empty p b{color:var(--yellow);animation:blink 1.3s steps(1) infinite}
+.examples{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.ex{
+  font-size:11.5px;color:var(--muted);padding:6px 12px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--line);background:var(--panel);transition:all .15s;
+}
+.ex:hover{color:var(--yellow);border-color:rgba(255,210,63,.5);background:var(--yellow-dim)}
+
+/* ── نوار ورودی ──────────────────────────────────────────────────── */
+.inputbar{
+  position:sticky;bottom:0;z-index:40;
+  background:linear-gradient(180deg,transparent,rgba(6,6,9,.92) 30%);
+  padding:14px 22px 18px;
+}
+.ib-inner{
+  max-width:1560px;margin:0 auto;display:flex;gap:10px;align-items:flex-end;
+  background:linear-gradient(180deg,var(--panel),var(--panel2));
+  border:1px solid var(--line-strong);border-radius:16px;padding:10px 12px;
+  box-shadow:0 8px 40px rgba(255,43,74,.12), 0 4px 24px rgba(0,0,0,.5);
+  transition:box-shadow .25s;
+}
+.ib-inner:focus-within{box-shadow:0 8px 44px rgba(255,43,74,.3), 0 4px 24px rgba(0,0,0,.5);animation:breathe 3s ease-in-out infinite}
+.ib-inner textarea{
+  flex:1;background:transparent;border:none;outline:none;resize:none;color:var(--text);
+  font-family:var(--fa);font-size:14px;line-height:1.8;max-height:130px;min-height:24px;padding:2px 4px;
+}
+.ib-inner textarea::placeholder{color:var(--faint)}
+#sendBtn{
+  flex:0 0 auto;display:flex;align-items:center;gap:8px;cursor:pointer;
+  background:linear-gradient(145deg,var(--red-deep),var(--red-dark));color:#fff;
+  border:1px solid var(--line-strong);border-radius:11px;padding:9px 20px;font-family:var(--fa);font-size:13.5px;font-weight:600;
+  transition:all .2s;box-shadow:0 0 16px rgba(255,43,74,.35);
+}
+#sendBtn:hover:not(:disabled){box-shadow:0 0 26px rgba(255,43,74,.6);transform:translateY(-1px)}
+#sendBtn:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
+#sendBtn .k{font-family:var(--mono);font-size:10px;opacity:.7;border:1px solid rgba(255,255,255,.25);border-radius:4px;padding:1px 5px;direction:ltr}
+.rounds{max-width:1560px;margin:8px auto 0;display:flex;gap:6px;align-items:center;font-family:var(--mono);font-size:10.5px;color:var(--faint);direction:ltr}
+.rounds .dot{width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,.08)}
+.rounds .dot.done{background:var(--teal);box-shadow:0 0 6px rgba(62,230,207,.6)}
+.rounds .dot.err{background:var(--red)}
+.rounds .dot.cur{background:var(--yellow);animation:blink .7s steps(1) infinite}
+
+/* ── مودال توکن ──────────────────────────────────────────────────── */
+.overlay{
+  position:fixed;inset:0;z-index:100;display:none;place-items:center;
+  background:rgba(3,2,4,.78);backdrop-filter:blur(6px);
+}
+.overlay.show{display:grid}
+.modal{
+  width:min(480px,92vw);border-radius:18px;padding:26px 26px 22px;position:relative;
+  background:linear-gradient(180deg,#150d10,#0c0809);
+  border:1px solid var(--line-strong);animation:breathe 2.6s ease-in-out infinite;
+}
+.modal h2{color:var(--red);font-size:18px;margin-bottom:4px;text-shadow:0 0 12px rgba(255,43,74,.5)}
+.modal .sub{color:var(--muted);font-size:12.5px;line-height:1.9;margin-bottom:16px}
+.modal .sub a{color:var(--teal);text-decoration:none}
+.modal .sub a:hover{text-decoration:underline}
+.modal input{
+  width:100%;padding:11px 14px;border-radius:10px;outline:none;font-family:var(--mono);font-size:13px;direction:ltr;
+  background:rgba(0,0,0,.4);border:1px solid var(--line);color:var(--yellow);letter-spacing:1px;transition:border-color .2s;
+}
+.modal input:focus{border-color:var(--red)}
+.modal .row{display:flex;gap:10px;margin-top:14px}
+.btn{
+  flex:1;padding:10px;border-radius:10px;cursor:pointer;font-family:var(--fa);font-size:13.5px;font-weight:600;transition:all .2s;
+  border:1px solid var(--line-strong);background:linear-gradient(145deg,var(--red-deep),var(--red-dark));color:#fff;
+}
+.btn:hover:not(:disabled){box-shadow:0 0 20px rgba(255,43,74,.5)}
+.btn.ghost{background:transparent;border-color:rgba(255,255,255,.15);color:var(--muted)}
+.btn.ghost:hover{color:var(--text);box-shadow:none;border-color:rgba(255,255,255,.3)}
+.modal .err{color:var(--err);font-size:12px;margin-top:10px;line-height:1.8;min-height:18px}
+.modal.shake{animation:shake .45s}
+.modal .secure{
+  display:flex;align-items:center;gap:8px;margin-top:14px;font-size:11px;color:var(--faint);
+}
+.modal .secure .led{width:7px;height:7px;border-radius:50%;background:var(--ok);color:var(--ok);animation:softPulse 2.4s infinite}
+
+.mtop{margin-top:12px;font-size:12px;color:var(--muted);line-height:1.8}
+.mtop b{color:var(--teal)}
+</style>
+<body>
+
+<!-- ═══════════ هدر ═══════════ -->
+<header>
+  <div class="logo">
+    <div class="logo-mark">DX</div>
+    <div>
+      <h1>DEVX</h1>
+      <small>ایجنت خودمختار DeepSeek × GitHub — حافظه‌دار • مهارت‌آموز</small>
+    </div>
+  </div>
+  <div class="chips">
+    <div class="chip" id="chipDeepseek"><i class="led"></i>DEEPSEEK <b id="dsState">—</b></div>
+    <div class="chip" id="chipGithub"><i class="led"></i>GITHUB <b id="ghState">—</b></div>
+    <div class="chip" id="chipMemory"><i class="led"></i>MEMORY <b id="memState">0</b></div>
+    <div class="chip" id="chipSkills"><i class="led"></i>SKILLS <b id="skillState">0</b></div>
+    <div class="chip" id="chipTools"><i class="led"></i>TOOLS <b id="toolState">0</b></div>
+    <span class="live blink">● LIVE</span>
+    <span class="clock" id="clock">--:--:--</span>
+  </div>
+</header>
+
+<!-- ═══════════ نوار هشدار لاگین دیپ‌سیک ═══════════ -->
+<div id="alertBar">
+  <span class="dot"></span>
+  <span id="alertMsg"><b>ورود لازم است</b> — اکانت دیپ‌سیک لاگین نیست.</span>
+  <button class="btn" style="flex:0 0 auto;padding:7px 16px" onclick="manualLogin()">🔑 باز کردن پنجرهٔ ورود</button>
+  <button class="btn ghost" style="flex:0 0 auto;padding:7px 16px" onclick="reconnect()">↻ اتصال مجدد</button>
+</div>
+
+<!-- ═══════════ بدنه ═══════════ -->
+<main>
+  <section class="stream" id="stream">
+    <div id="empty">
+      <div class="radar"><div class="beam"></div><div class="core"></div></div>
+      <h2>سیستم آماده است</h2>
+      <p>یک تسک بده؛ ایجنت با <b>حافظه</b> و <b>مهارت‌های آموخته‌شده</b> اجرا می‌کند ▊</p>
+      <div class="examples">
+        <span class="ex" onclick="useExample(this)">در مخزن agent وضعیت PRها را ببین و خلاصه کن</span>
+        <span class="ex" onclick="useExample(this)">فهرست مخازنم را بده و بزرگ‌ترین را تحلیل کن</span>
+        <span class="ex" onclick="useExample(this)">یک Issue با عنوان «DevX review» بساز</span>
+      </div>
+    </div>
+  </section>
+
+  <aside class="side">
+    <!-- حافظه -->
+    <div class="panel">
+      <div class="panel-h"><span class="icon">🧠</span><h3>حافظهٔ ماندگار</h3><span class="cnt" id="memCount">0</span></div>
+      <div class="tabs">
+        <span class="tab active" data-sec="facts" onclick="tabMem(this)">حقایق</span>
+        <span class="tab" data-sec="lessons" onclick="tabMem(this)">درس‌ها</span>
+        <span class="tab" data-sec="tasks" onclick="tabMem(this)">تسک‌ها</span>
+        <span class="tab" data-sec="notes" onclick="tabMem(this)">یادداشت</span>
+      </div>
+      <div class="panel-b" id="memBody"><div class="mem-item">در انتظار داده…</div></div>
+    </div>
+    <!-- مهارت‌ها -->
+    <div class="panel">
+      <div class="panel-h"><span class="icon">🧰</span><h3>مهارت‌های آموخته‌شده</h3><span class="cnt" id="skillCount">0</span></div>
+      <div class="panel-b" id="skillBody"><div class="mem-item">هنوز مهارتی یاد نگرفته — با اولین تسک یاد می‌گیرد.</div></div>
+    </div>
+    <!-- گیت‌هاب -->
+    <div class="panel">
+      <div class="panel-h"><span class="icon">⬡</span><h3>GitHub</h3><span class="cnt" id="ghRate">—</span></div>
+      <div class="panel-b" id="ghBody">
+        <div class="mem-item">توکن گیت‌هاب تنظیم نشده — از مودال بالای صفحه وارد کن.</div>
+      </div>
+    </div>
+    <!-- سیستم -->
+    <div class="panel">
+      <div class="panel-h"><span class="icon">⚙</span><h3>سیستم</h3></div>
+      <div class="panel-b">
+        <div class="sys">
+          <span class="kv">MAX_ROUNDS <b id="kvRounds">10</b></span>
+          <span class="kv">MEMORY <b id="kvMem">memory/</b></span>
+          <span class="kv">SKILLS <b id="kvSkill">skills_learned/</b></span>
+          <span class="kv">SUCCESS <b id="kvSuccess">—</b></span>
+          <span class="kv">TOP TOOL <b id="kvTopTool">—</b></span>
+        </div>
+        <div class="mtop">ایجنت بعد از هر تسکِ موفق <b>مهارت</b> یاد می‌گیرد و با هر خطا <b>درس</b> ثبت می‌کند؛ این‌ها در اجرای بعدی هم یادش می‌ماند.</div>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<!-- ═══════════ نوار ورودی ═══════════ -->
+<div class="inputbar">
+  <div class="ib-inner">
+    <textarea id="taskInput" rows="1" placeholder="تسک را بنویس… (Enter = اجرا / Shift+Enter = خط جدید)"></textarea>
+    <button id="sendBtn" onclick="sendTask()" disabled>▶ اجرا <span class="k">ENTER</span></button>
+  </div>
+  <div class="rounds" id="rounds"></div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<!-- ═══════════ مودال توکن گیت‌هاب ═══════════ -->
+<div class="overlay show" id="tokenOverlay">
+  <div class="modal" id="tokenModal">
+    <h2>⬡ GitHub Classic Token</h2>
+    <div class="sub">
+      توکن را از <a href="https://github.com/settings/tokens" target="_blank">github.com/settings/tokens</a>
+      بساز (Generate new token (classic)) با اسکوپ‌های <b style="color:var(--yellow)">repo</b> و در صورت نیاز <b style="color:var(--yellow)">workflow</b>.
+      توکن کلاسیک به‌طور پیش‌فرض به منابع سازمان‌ها هم دسترسی دارد؛ با احتیاط بساز.
+    </div>
+    <input type="password" id="tokenInput" placeholder="ghp_…" autocomplete="off" spellcheck="false">
+    <div class="err" id="tokenErr"></div>
+    <div class="row">
+      <button class="btn" id="tokenSubmit" onclick="submitToken()">✓ اعتبارسنجی و اتصال</button>
+      <button class="btn ghost" onclick="closeTokenModal()">فعلاً نه</button>
+    </div>
+    <div class="secure"><span class="led"></span> توکن فقط در حافظهٔ همین اجرا می‌ماند — در فایل، لاگ یا کد ذخیره نمی‌شود.</div>
+  </div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════
+   DevX frontend logic — vanilla JS، بدون وابستگی
+   ═══════════════════════════════════════════════════════════════════ */
+const $ = id => document.getElementById(id);
+const stream = $('stream'), toasts = $('toasts');
+let currentToolCard = null, typingTimer = null, running = false;
+
+/* ── ابزارک‌ها ─────────────────────────────────────────────────── */
+function esc(s){const d=document.createElement('div');d.textContent=String(s??'');return d.innerHTML}
+function md(s){ // رندر مارک‌داون سبک: bold / code / link / خط جدید
+  return esc(s)
+    .replace(/`([^`]+)`/g,'<code style="font-family:var(--mono);color:var(--yellow);background:rgba(255,210,63,.08);padding:1px 5px;border-radius:4px;font-size:12px">$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g,'<b style="color:var(--yellow)">$1</b>')
+    .replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g,'<a href="$2" target="_blank" style="color:var(--teal)">$1</a>');
+}
+function toast(kind,msg,ms=4200){
+  const t=document.createElement('div');t.className='toast '+kind;t.innerHTML=msg;
+  toasts.appendChild(t);setTimeout(()=>t.remove(),ms);
+}
+function now(){const d=new Date();return d.toLocaleTimeString('fa-IR',{hour12:false})}
+setInterval(()=>{$('clock').textContent=now()},1000);$('clock').textContent=now();
+
+function card(cls,who,roleText){
+  const c=document.createElement('div');c.className='card '+cls;
+  c.innerHTML=`<div class="who"><span class="role">${roleText}</span>${who}</div>`;
+  return c;
+}
+function useExample(el){$('taskInput').value=el.textContent;$('taskInput').focus();autoGrow();updateSend()}
+function autoGrow(){const t=$('taskInput');t.style.height='auto';t.style.height=Math.min(t.scrollHeight,130)+'px'}
+
+/* ── نشانگر دورها ─────────────────────────────────────────────── */
+function renderRounds(cur,max){
+  const r=$('rounds');
+  let dots='';
+  for(let i=1;i<=max;i++){
+    let cls='dot';
+    if(i<cur)cls+=' done';else if(i===cur)cls+=' cur';
+    dots+=`<span class="${cls}"></span>`;
+  }
+  r.innerHTML=`ROUNDS ${cur}/${max} &nbsp;`+dots;
+}
+function finishRounds(){const r=$('rounds');r.querySelectorAll('.dot.cur').forEach(d=>d.classList.remove('cur'));}
+
+/* ── کارت ابزار ───────────────────────────────────────────────── */
+function addToolCard(tool,args,round){
+  const c=card('tool','','TOOL');
+  c.innerHTML=`
+    <div class="head" onclick="this.parentElement.classList.toggle('open')">
+      <span class="icon">⚙</span>
+      <span class="tname">${esc(tool)}</span>
+      <span class="rno">R${round}</span>
+      <span class="status run"><span class="spin"></span> running…</span>
+    </div>
+    <div class="detail">
+      <pre>args = ${esc(JSON.stringify(args,null,2))}</pre>
+      <pre class="res" style="color:var(--faint)">result = …</pre>
+    </div>`;
+  stream.appendChild(c);
+  c.scrollIntoView({behavior:'smooth',block:'end'});
+  return c;
+}
+function settleToolCard(c,ok,preview){
+  const st=c.querySelector('.status');st.className='status '+(ok?'ok':'fail');
+  st.innerHTML=(ok?'✅ OK':'❌ ERROR');
+  c.querySelector('.icon').classList.toggle('err',!ok);
+  const res=c.querySelector('.res');
+  res.textContent='result = '+(preview||'');
+  res.style.color=ok?'var(--faint)':'var(--err)';
+}
+
+/* ── پاسخ نهایی با اثر ماشین‌نویس ─────────────────────────────── */
+function typeFinal(answer,ok){
+  const c=card(ok?'final':'user','DevX','FINAL');
+  const txt=document.createElement('div');txt.className='txt';
+  c.appendChild(txt);stream.appendChild(c);
+  let i=0;const speed=Math.max(8,Math.min(28, 900/Math.max(1,answer.length/40)));
+  if(typingTimer)clearInterval(typingTimer);
+  typingTimer=setInterval(()=>{
+    i+=Math.ceil(answer.length/120)+1;
+    txt.innerHTML=md(answer.slice(0,i))+(i<answer.length?'<span class="caret"></span>':'');
+    if(i>=answer.length){clearInterval(typingTimer);txt.innerHTML=md(answer);}
+    stream.lastChild?.scrollIntoView({behavior:'smooth',block:'end'});
+  },speed);
+  stream.lastChild?.scrollIntoView({behavior:'smooth',block:'end'});
+}
+
+/* ── پنل حافظه ────────────────────────────────────────────────── */
+let memSection='facts';
+function tabMem(el){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');memSection=el.dataset.sec;loadMemory();
+}
+async function loadMemory(){
+  try{
+    const r=await fetch(`/api/memory?section=${memSection}`);const j=await r.json();
+    const body=$('memBody');
+    if(memSection==='tasks'){
+      const tasks=j.tasks||[];
+      body.innerHTML=tasks.length?tasks.map(t=>`
+        <div class="mem-item ${t.ok?'':'lesson'}">
+          ${esc(t.task)}<br>
+          <span style="color:${t.ok?'var(--ok)':'var(--err)'};font-family:var(--mono);font-size:10px;direction:ltr;display:inline-block">
+          ${t.ok?'✅ OK':'❌ FAIL'} · ${t.rounds}R · ${t.duration_s}s</span>
+          ${t.skill?`<span class="meta">🧰 ${esc(t.skill)}</span>`:''}
+          <span class="meta">${esc(t.ts)}</span>
+        </div>`).join(''):'<div class="mem-item">هنوز تسکی اجرا نشده.</div>';
+    }else{
+      const items=j[memSection]||[];
+      body.innerHTML=items.length?items.map(i=>`
+        <div class="mem-item ${memSection==='facts'?'':memSection}">${esc(i.text)}
+          <span class="meta">hits:${i.hits||0} · ${esc(i.ts)}</span></div>`).join('')
+        :'<div class="mem-item">خالی است — ایجنت خودش با کارکردن پرش می‌کند.</div>';
+    }
+  }catch(e){console.warn('memory load failed',e)}
+}
+
+/* ── پنل مهارت‌ها ─────────────────────────────────────────────── */
+async function loadSkills(){
+  try{
+    const r=await fetch('/api/skills');const j=await r.json();
+    const skills=j.skills||[];$('skillCount').textContent=skills.length;$('skillState').textContent=skills.length;
+    $('skillBody').innerHTML=skills.length?skills.map(s=>`
+      <div class="skill">
+        <h4>${esc(s.name)}</h4>
+        <p>${esc(s.description||'')}</p>
+        <div class="bars">
+          <div class="bar"><i style="width:${Math.min(100,s.usage*12)}%"></i></div>
+          <span class="num">use ${s.usage} · ok ${s.success}</span>
+        </div>
+      </div>`).join('')
+      :'<div class="mem-item">هنوز مهارتی یاد نگرفته — با اولین تسک یاد می‌گیرد.</div>';
+  }catch(e){console.warn('skills load failed',e)}
+}
+
+/* ── پنل گیت‌هاب ──────────────────────────────────────────────── */
+async function loadGithub(){
+  try{
+    const r=await fetch('/api/github/overview');const j=await r.json();
+    const body=$('ghBody'),chip=$('chipGithub');
+    if(!j.ok){
+      body.innerHTML='<div class="mem-item">توکن گیت‌هاب تنظیم نشده — از مودال بالای صفحه وارد کن.</div>';
+      chip.className='chip';$('ghState').textContent='—';$('ghRate').textContent='—';return;
+    }
+    chip.className='chip on';$('ghState').textContent=j.user.login;
+    $('ghRate').textContent=`${j.rate.remaining}/${j.rate.limit}`;
+    const repos=j.repos||[];
+    body.innerHTML=`
+      <div class="gh-user">
+        <div class="gh-avatar"></div>
+        <div><b>${esc(j.user.login)}</b>
+        <small>${esc(j.user.name||'—')} · scopes: ${esc(j.user.token_scopes||'—')}</small></div>
+      </div>` +
+      repos.map(r=>`<div class="repo"><b>${esc(r.full_name)}</b>
+        <span class="tag ${r.private?'private':'public'}">${r.private?'PRIVATE':'PUBLIC'}</span></div>`).join('') ||
+      '<div class="mem-item">مخزنی یافت نشد.</div>';
+  }catch(e){console.warn('github load failed',e)}
+}
+
+/* ── وضعیت کلی ────────────────────────────────────────────────── */
+async function loadState(){
+  try{
+    const r=await fetch('/api/state');const s=await r.json();
+    $('toolState').textContent=s.tools;
+    $('kvRounds').textContent=s.max_rounds;
+    $('kvSuccess').textContent=s.memory&&s.memory.stats.success_rate!=null
+      ? Math.round(s.memory.stats.success_rate*100)+'%' : '—';
+    $('kvTopTool').textContent=s.memory&&s.memory.stats.top_tools&&s.memory.stats.top_tools.length
+      ? s.memory.stats.top_tools[0].tool : '—';
+    const c=s.memory.counts;$('memState').textContent=c.facts+c.lessons+c.tasks+c.notes;
+    $('memCount').textContent=c.facts+c.lessons+c.notes;
+    $('chipMemory').className='chip '+(c.facts+c.lessons+c.notes>0?'on':'');
+    // دیپ‌سیک
+    const ds=s.deepseek,cds=$('chipDeepseek');
+    cds.className='chip '+(ds.ready?'on':'err');
+    $('dsState').textContent=ds.ready?'READY':'WAIT';
+    const bar=$('alertBar');
+    if(!ds.ready&&ds.started!==false){bar.classList.add('show');$('alertMsg').innerHTML=`<b>انتظار اتصال</b> — ${esc(ds.message||'')}`;}
+    else if(!ds.ready){bar.classList.add('show');$('alertMsg').innerHTML=`<b>ورود لازم است</b> — ${esc(ds.message||'')}`;}
+    else bar.classList.remove('show');
+    $('sendBtn').disabled=running||!ds.ready;
+    // توکن
+    if(s.token.set){$('tokenOverlay').classList.remove('show');}
+    else{$('tokenOverlay').classList.add('show');}
+    $('kvMem').textContent='memory/';$('kvSkill').textContent='skills_learned/';
+  }catch(e){console.warn('state load failed',e)}
+}
+
+/* ── توکن ─────────────────────────────────────────────────────── */
+async function submitToken(){
+  const token=$('tokenInput').value.trim(),err=$('tokenErr'),modal=$('tokenModal'),btn=$('tokenSubmit');
+  err.textContent='';
+  if(!token){err.textContent='توکن را وارد کن.';return}
+  btn.disabled=true;btn.innerHTML='<span class="spin"></span> در حال اعتبارسنجی…';
+  try{
+    const r=await fetch('/api/token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});
+    const j=await r.json();
+    if(j.ok){
+      toast('ok',`✅ متصل شد به <b>${esc(j.login)}</b> — اسکوپ‌ها: ${esc(j.scopes||'')}`);
+      $('tokenOverlay').classList.remove('show');$('tokenInput').value='';
+      loadState();loadGithub();
+    }else{
+      err.textContent=j.error||'توکن نامعتبر است.';
+      modal.classList.remove('shake');void modal.offsetWidth;modal.classList.add('shake');
+    }
+  }catch(e){err.textContent='خطای ارتباط با سرور.'}
+  finally{btn.disabled=false;btn.textContent='✓ اعتبارسنجی و اتصال'}
+}
+function closeTokenModal(){$('tokenOverlay').classList.remove('show');toast('info','بدون توکن گیت‌هاب هم می‌توانی از حافظه/مهارت/ابزارهای داخلی استفاده کنی.')}
+$('tokenInput')?.addEventListener('keydown',e=>{if(e.key==='Enter')submitToken()});
+
+/* ── دیپ‌سیک: ورود دستی / اتصال مجدد ─────────────────────────── */
+async function manualLogin(){
+  const r=await fetch('/api/deepseek/login',{method:'POST'});const j=await r.json();
+  toast('info',esc(j.message||'پنجرهٔ مرئی باز می‌شود'),6000);
+}
+async function reconnect(){
+  await fetch('/api/deepseek/reconnect',{method:'POST'});
+  toast('info','اتصال مجدد آغاز شد…');
+}
+
+/* ── ارسال تسک ───────────────────────────────────────────────── */
+function updateSend(){$('sendBtn').disabled=running||!$('taskInput').value.trim()||!$('chipDeepseek').classList.contains('on')}
+async function sendTask(){
+  const task=$('taskInput').value.trim();
+  if(!task||running)return;
+  try{
+    const r=await fetch('/api/task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task})});
+    const j=await r.json();
+    if(!j.ok){toast('err','⛔ '+esc(j.error||'شروع تسک ناموفق بود'));return}
+    $('taskInput').value='';autoGrow();updateSend();
+    $('empty')?.remove();
+    const c=card('user','تو · '+now(),'TASK');
+    c.innerHTML+=`<div class="txt">${esc(task)}</div>`;
+    stream.appendChild(c);c.scrollIntoView({behavior:'smooth',block:'end'});
+  }catch(e){toast('err','خطای شبکه: '+esc(e))}
+}
+$('taskInput').addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendTask()}
+});
+$('taskInput').addEventListener('input',autoGrow);
+
+/* ── اتصال SSE و هندل رویدادها ───────────────────────────────── */
+const es=new EventSource('/api/stream');
+es.onmessage=ev=>{
+  let m;try{m=JSON.parse(ev.data)}catch(_){return}
+  const e=m.event;
+  switch(e){
+    case 'snapshot': refreshAll(); break;
+    case 'deepseek_state': loadState(); break;
+    case 'token_state': loadState(); loadGithub();
+      toast('ok',`⬡ متصل: <b>${esc(m.login)}</b>`); break;
+    case 'task_start':
+      running=true;updateSend();renderRounds(0,m.max_rounds);
+      $('empty')?.remove();
+      if(m.task)toast('info','🚀 تسک شروع شد'); break;
+    case 'round': renderRounds(m.round,m.max_rounds); break;
+    case 'tool_call':
+      currentToolCard=addToolCard(m.tool,m.arguments,m.round);
+      if(m.tool==='save_memory'||m.tool==='save_skill')setTimeout(refreshAll,1200);
+      break;
+    case 'tool_result':
+      if(currentToolCard)settleToolCard(currentToolCard,m.ok,m.preview);
+      break;
+    case 'context':
+      if(m.memory||m.skills)toast('info','🧠 حافظه/مهارت مرتبط به پرامپت تزریق شد');
+      break;
+    case 'final':
+      running=false;finishRounds();updateSend();typeFinal(m.answer,m.ok);break;
+    case 'skill_learned':
+      toast('ok',`🧰 مهارت جدید یاد گرفته شد: <b>${esc(m.name||'')}</b>`);loadSkills();break;
+    case 'lesson_learned':
+      toast('info',`📚 درس ثبت شد: ${esc((m.text||'').slice(0,90))}…`);loadMemory();break;
+    case 'task_end':
+      running=false;finishRounds();updateSend();refreshAll();
+      toast(m.ok?'ok':'err',m.ok?'✅ تسک تمام شد':'⚠️ تسک با مشکل تمام شد');
+      break;
+    case 'memory_updated': refreshAll(); break;
+  }
+};
+es.onerror=()=>{ /* EventSource خودش reconnect می‌کند */ };
+
+function refreshAll(){loadState();loadMemory();loadSkills();loadGithub();}
+
+/* ── شروع ─────────────────────────────────────────────────────── */
+refreshAll();
+updateSend();
+</script>
+</body>
+</html>

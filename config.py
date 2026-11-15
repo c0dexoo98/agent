@@ -71,3 +71,42 @@ GITHUB_API_URL: str = os.getenv("GITHUB_API_URL", "https://api.github.com")
 
 # خروجی ابزارها قبل از ارسال به دیپ‌سیک به این اندازه کوتاه می‌شود (کاراکتر)
 TOOL_RESULT_MAX_CHARS: int = int(os.getenv("TOOL_RESULT_MAX_CHARS", "20000"))
+
+# ---------------------------------------------------------------------------
+# DevX — محیط وب ایجنت (سرور محلی + رابط HUD)
+# ---------------------------------------------------------------------------
+
+DEVX_HOST: str = os.getenv("DEVX_HOST", "127.0.0.1")
+DEVX_PORT: int = int(os.getenv("DEVX_PORT", "8770"))
+
+# ---------------------------------------------------------------------------
+# حافظهٔ ماندگار (Memory)
+# ---------------------------------------------------------------------------
+
+MEMORY_DIR: Path = Path(os.getenv("MEMORY_DIR", str(BASE_DIR / "memory"))).expanduser().resolve()
+
+# سقف تعداد آیتم‌های هر بخش حافظه (قدیمی‌ها آرشیو نمی‌شوند، حذف می‌شوند)
+MEMORY_MAX_FACTS: int = int(os.getenv("MEMORY_MAX_FACTS", "120"))
+MEMORY_MAX_LESSONS: int = int(os.getenv("MEMORY_MAX_LESSONS", "80"))
+MEMORY_MAX_TASKS: int = int(os.getenv("MEMORY_MAX_TASKS", "80"))
+
+# چند آیتم مرتبط از هر بخش در پرامپت تزریق شود
+MEMORY_INJECT_FACTS: int = int(os.getenv("MEMORY_INJECT_FACTS", "6"))
+MEMORY_INJECT_LESSONS: int = int(os.getenv("MEMORY_INJECT_LESSONS", "4"))
+MEMORY_INJECT_TASKS: int = int(os.getenv("MEMORY_INJECT_TASKS", "3"))
+
+# ---------------------------------------------------------------------------
+# کتابخانهٔ مهارت‌ها (Skills) — یادگیری خودکار ایجنت
+# ---------------------------------------------------------------------------
+
+SKILLS_DIR: Path = Path(os.getenv("SKILLS_DIR", str(BASE_DIR / "skills_learned"))).expanduser().resolve()
+
+# پس از هر تسک موفق، ایجنت تلاش کند یک مهارت قابل‌استفادهٔ مجدد استخراج و ذخیره کند؟
+AUTO_LEARN_SKILL: bool = _bool("AUTO_LEARN_SKILL", "true")
+
+# اگر در تسک خطای ابزار داشتیم، یک «درس» در حافظه ثبت شود؟
+AUTO_LEARN_LESSON: bool = _bool("AUTO_LEARN_LESSON", "true")
+
+# حداکثر مهارت‌های مرتبطی که ابتدای هر تسک به پرامپت تزریق می‌شود
+SKILLS_INJECT_LIMIT: int = int(os.getenv("SKILLS_INJECT_LIMIT", "3"))
+

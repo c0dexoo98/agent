@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""ایجنت خودمختار DeepSeek + GitHub — نقطهٔ ورود برنامه.
+"""ایجنت خودمختار DevX (حالت ترمینال) — DeepSeek + GitHub + حافظه + مهارت.
 
-چرخهٔ کار:
-  ۱) هنگام راه‌اندازی با getpass یک GitHub Classic Token از کاربر می‌گیرد
-     (پیشوند ghp_، ساخته‌شده از github.com/settings/tokens با اسکوپ‌های
-      repo و در صورت نیاز workflow) و اعتبار آن را با GET /user می‌سنجد؛
+این فایل حالت CLI است؛ رابط وب حرفه‌ای با `python devx.py` اجرا می‌شود.
+هردو حالت از یک موتور مشترک (agent_loop.AgentEngine) استفاده می‌کنند که:
+  * حافظهٔ ماندگار دارد و ابتدای هر تسک، حقایق/درس‌های مرتبط را یادش می‌آورد
+  * پس از هر تسک موفق یک مهارت یاد می‌گیرد و به کتابخانه‌اش اضافه می‌کند
+  * تاریخچهٔ تسک‌ها و آمار موفقیت را نگه می‌دارد
+
+چرخهٔ کار CLI:
+  ۱) دریافت GitHub Classic Token با getpass (github.com/settings/tokens —
+     اسکوپ‌های repo و در صورت نیاز workflow) و اعتبارسنجی با GET /user؛
      توکن فقط در حافظهٔ همین اجرا نگه داشته می‌شود و هرگز ذخیره/لاگ نمی‌شود.
-  ۲) مرورگر ماندگار Playwright را با user_data_dir ثابت (از .env) باز می‌کند
-     و به اکانت chat.deepseek.com وصل می‌شود.
-  ۳) حلقهٔ ایجنت (Agent Loop) را اجرا می‌کند: پیام کاربر + شِمای ابزارها به
-     دیپ‌سیک می‌رود؛ اگر مدل ابزاری خواست، همان ابزار (مثلاً عملیات گیت‌هاب)
-     اجرا و نتیجه به مدل برمی‌گردد تا پاسخ نهایی ساخته شود — حداکثر MAX_ROUNDS
-     دور (پیش‌فرض ۱۰) تا از حلقهٔ بی‌پایان جلوگیری شود.
+  ۲) مرورگر ماندگار Playwright با user_data_dir ثابت (از .env) باز می‌شود.
+  ۳) موتور ایجنت روی اکانت chat.deepseek.com تسک‌ها را اجرا می‌کند.
 
 اجرا:
     python agent.py                      # حالت تعاملی (REPL)
@@ -20,8 +21,8 @@
     python agent.py --tools              # فقط فهرست ابزارها (بدون مرورگر)
 
 دستورات REPL:
-    /tools    فهرست ابزارهای فعال        /newchat  گفت‌وگوی تازه در دیپ‌سیک
-    /reset    پاک کردن سابقهٔ نمایش      /exit یا /quit خروج
+    /tools   فهرست ابزارها     /memory  آمار حافظه    /skills فهرست مهارت‌ها
+    /stats   آمار عملکرد       /newchat گفت‌وگوی تازه   /exit خروج
 """
 from __future__ import annotations
 
@@ -33,16 +34,19 @@ from typing import Any, Dict, List, Optional
 from github import GithubException
 
 import config
+from agent_loop import AgentEngine, DeepSeekBrain, EventBus
 from builtin_tools import register_builtin_tools
 from deepseek_client import DeepSeekClient, DeepSeekError
 from github_tools import GitHubTools, TokenInvalidError, register_github_tools
-from system_prompt import build_system_prompt, parse_model_action
+from memory import MemoryStore, register_memory_tools
+from skills import SkillLibrary, register_skill_tools
 from tool_registry import ToolRegistry
 
 BANNER = r"""
 ╔══════════════════════════════════════════════════════════════════╗
-║   DeepSeek × GitHub Agent  —  ابزارمحور، پلاگین‌پذیر، خودمختار     ║
-║   chat.deepseek.com (Playwright) + GitHub REST (PyGithub 2.x)     ║
+║   DevX Agent (CLI) — حافظه‌دار، مهارت‌آموز، ابزارمحور               ║
+║   chat.deepseek.com (Playwright) + GitHub (PyGithub 2.x)          ║
+║   رابط وب حرفه‌ای:  python devx.py  →  http://127.0.0.1:8770       ║
 ╚══════════════════════════════════════════════════════════════════╝
 """
 
@@ -95,105 +99,47 @@ def obtain_github_tools(max_attempts: Optional[int] = None) -> GitHubTools:
 
 
 # ======================================================================
-# حلقهٔ ایجنت
+# ساخت رجیستری و موتور
 # ======================================================================
 
-def run_agent_task(
-    client: DeepSeekClient,
-    registry: ToolRegistry,
-    system_prompt: str,
-    task: str,
-    max_rounds: int,
-    trace: Optional[List[Dict[str, Any]]] = None,
-) -> str:
-    """اجرای یک تسک با حلقهٔ ایجنت و برگرداندن پاسخ نهایی مدل.
-
-    هر تسک در یک گفت‌وگوی تازهٔ دیپ‌سیک اجرا می‌شود؛ پیام اول = پرامپت سیستمی
-    + تسک کاربر. اگر مدل JSON ابزار فرستاد، ابزار اجرا و نتیجه با پیشوند
-    TOOL_RESULT در همان گفت‌وگو فرستاده می‌شود تا مدل دور بعد را تصمیم بگیرد.
-    """
-    client.new_chat()
-    first_message = f"{system_prompt}\n\n=== USER TASK ===\n{task}"
-    client.send_message(first_message)
-
-    for round_no in range(1, max_rounds + 1):
-        raw = client.wait_for_response()
-        action = parse_model_action(raw)
-
-        if action is None:
-            # مدل از پروتکل خارج شد — متن خام را به‌عنوان پاسخ نهایی می‌پذیریم
-            print("ℹ️  پاسخ خارج از پروتکل JSON بود؛ به‌عنوان پاسخ نهایی پذیرفته شد.")
-            return raw
-
-        if "final_answer" in action:
-            return str(action.get("final_answer") or "").strip() or raw
-
-        tool_name = str(action.get("tool") or "").strip()
-        arguments = action.get("arguments") or {}
-        if not tool_name:
-            return str(arguments) or raw
-
-        print(f"🔧 دور {round_no}/{max_rounds}: ابزار «{tool_name}» با آرگومان‌ها: {json.dumps(arguments, ensure_ascii=False)[:200]}")
-        result = registry.execute(tool_name, arguments)
-        status = "OK" if result.get("ok") else "ERROR"
-        print(f"   ↳ [{status}] {json.dumps(result, ensure_ascii=False)[:160]}")
-
-        if trace is not None:
-            trace.append(
-                {
-                    "round": round_no,
-                    "tool": tool_name,
-                    "arguments": arguments,
-                    "ok": bool(result.get("ok")),
-                }
-            )
-
-        payload = f"TOOL_RESULT {tool_name}:\n" + json.dumps(result, ensure_ascii=False)
-        client.send_message(payload)
-
-    # سقف دورها پر شد — از حلقهٔ بی‌پایان جلوگیری می‌کنیم
-    return (
-        f"⚠️ پس از {max_rounds} دورِ ابزار، پاسخ نهایی کامل نشد. "
-        "کارهای انجام‌شده بالا خلاصه شده‌اند؛ می‌توانی ادامهٔ کار را به‌صورت تسک جدید بدهی."
-    )
-
-
-# ======================================================================
-# آماده‌سازی و رابط خط فرمان
-# ======================================================================
-
-def build_registry(gh_tools: GitHubTools) -> ToolRegistry:
-    """ساخت رجیستری و ثبت همهٔ پلاگین‌ها (گیت‌هاب + داخلی)."""
+def build_registry(gh_tools: Optional[GitHubTools], memory: MemoryStore, skills: SkillLibrary) -> ToolRegistry:
+    """ساخت رجیستری: گیت‌هاب (اگر توکن هست) + حافظه + مهارت + ابزارهای داخلی."""
     registry = ToolRegistry()
-    register_github_tools(registry, gh_tools)
+    if gh_tools is not None:
+        register_github_tools(registry, gh_tools)
+    register_memory_tools(registry, memory)
+    register_skill_tools(registry, skills)
     register_builtin_tools(registry)
     return registry
 
 
-def print_tools(registry: ToolRegistry) -> None:
-    print(f"\n🧰 {len(registry)} ابزار فعال:")
-    for name in registry.names():
-        tool = registry.get(name)
-        mark = " ⚠️dangerous" if tool.dangerous else ""
-        desc = tool.description.split(" — ")[0].split(". ")[0][:70]
-        print(f"  • {name}{mark} — {desc}")
-    print()
+def cli_event_printer(event: str, item: Dict[str, Any]) -> None:
+    """چاپ زندهٔ رویدادهای موتور در ترمینال."""
+    if event == "round":
+        print(f"⏱  دور {item['round']}/{item['max_rounds']}")
+    elif event == "tool_call":
+        args = json.dumps(item["arguments"], ensure_ascii=False)[:150]
+        print(f"🔧 ابزار «{item['tool']}» ← {args}")
+    elif event == "tool_result":
+        mark = "✅" if item["ok"] else "❌"
+        print(f"   {mark} {item['preview']}")
+    elif event == "skill_learned":
+        print(f"🧠 مهارت جدید آموخته شد: {item['name']}")
+    elif event == "lesson_learned":
+        print(f"📚 درس ثبت شد: {item['text'][:120]}")
 
 
-def main() -> None:
-    args = [a for a in sys.argv[1:]]
-    show_tools_only = "--tools" in args
-
+def run_cli() -> None:
     print(BANNER)
 
     gh_tools = obtain_github_tools()
-    registry = build_registry(gh_tools)
+    memory = MemoryStore()
+    skills = SkillLibrary()
 
-    if show_tools_only:
-        print_tools(registry)
-        return
+    bus = EventBus()
+    bus.subscribe(cli_event_printer)
 
-    client = DeepSeekClient(
+    brain_client = DeepSeekClient(
         user_data_dir=config.DEEPSEEK_USER_DATA_DIR,
         url=config.DEEPSEEK_URL,
         headless=config.DEEPSEEK_HEADLESS,
@@ -202,25 +148,35 @@ def main() -> None:
         stable_checks=config.RESPONSE_STABLE_CHECKS,
     )
     print(f"🌐 راه‌اندازی مرورگر ماندگار (پروفایل: {config.DEEPSEEK_USER_DATA_DIR}) ...")
-    client.start()
+    brain_client.start()
 
     try:
-        client.ensure_logged_in()
+        brain_client.ensure_logged_in()
     except Exception as e:
         print(f"⛔ {e}")
-        client.close()
+        brain_client.close()
         sys.exit(3)
 
-    system_prompt = build_system_prompt(registry, config.MAX_ROUNDS)
-    print_tools(registry)
-    print("✅ آماده است. تسک را بنویس (مثلاً: «در مخزن agent یک Issue با عنوان X بساز و اولین کامیت‌ها را خلاصه کن»).")
-    print("   دستورات: /tools  /newchat  /exit\n")
+    engine = AgentEngine(
+        brain=DeepSeekBrain(brain_client),
+        memory=memory,
+        skills=skills,
+        event_bus=bus,
+        max_rounds=config.MAX_ROUNDS,
+    )
+    engine.set_registry(build_registry(gh_tools, memory, skills))
 
+    counts = memory.counts()
+    print(f"🧠 حافظه: {counts['facts']} حقیقت، {counts['lessons']} درس، {counts['tasks']} تسک | 🧰 مهارت‌ها: {len(skills.list_skills())}")
+    print_tools(engine.registry)
+    print("✅ آماده است. تسک بده (یا /tools /memory /skills /stats /newchat /exit)\n")
+
+    args = [a for a in sys.argv[1:]]
     one_shot = " ".join(a for a in args if not a.startswith("--")).strip()
 
     try:
         if one_shot:
-            _run_task(client, registry, system_prompt, one_shot)
+            _run(engine, one_shot)
             return
         while True:
             try:
@@ -234,37 +190,49 @@ def main() -> None:
                 print("خداحافظ!")
                 break
             if task == "/tools":
-                print_tools(registry)
+                print_tools(engine.registry)
+                continue
+            if task == "/memory":
+                print("🧠", memory.counts(), "| آمار:", memory.stats())
+                continue
+            if task == "/skills":
+                for s in skills.list_skills():
+                    print(f"  🧰 {s['name']} (استفاده {s['usage']}x، موفق {s['success']}x) — {s['description'][:60]}")
+                continue
+            if task == "/stats":
+                print("📊", memory.stats())
                 continue
             if task == "/newchat":
-                client.new_chat()
-                print("✅ گفت‌وگوی تازه در دیپ‌سیک آغاز شد.\n")
+                brain_client.new_chat()
+                print("✅ گفت‌وگوی تازه آغاز شد.\n")
                 continue
-            _run_task(client, registry, system_prompt, task)
+            _run(engine, task)
     finally:
-        client.close()
+        brain_client.close()
 
 
-def _run_task(client: DeepSeekClient, registry: ToolRegistry, system_prompt: str, task: str) -> None:
-    trace: List[Dict[str, Any]] = []
-    print("🤖 در حال کار با دیپ‌سیک...\n")
+def _run(engine: AgentEngine, task: str) -> None:
+    print("🤖 در حال کار...\n")
     try:
-        answer = run_agent_task(
-            client=client,
-            registry=registry,
-            system_prompt=system_prompt,
-            task=task,
-            max_rounds=config.MAX_ROUNDS,
-            trace=trace,
-        )
-    except (DeepSeekError, Exception) as e:  # noqa: BLE001 — خطای حلقه نباید برنامه را ببندد
+        report = engine.run_task(task)
+    except Exception as e:  # noqa: BLE001 — خطای حلقه نباید برنامه را ببندد
         print(f"⛔ خطا در حلقهٔ ایجنت: {e}\n")
         return
     print("\n" + "─" * 64)
-    print("🤖 پاسخ نهایی:")
-    print(answer)
+    print(f"🤖 پاسخ نهایی ({report['rounds']} دور، {report['duration_s']}s):")
+    print(report["answer"])
     print("─" * 64 + "\n")
 
 
+def print_tools(registry: ToolRegistry) -> None:
+    print(f"\n🧰 {len(registry)} ابزار فعال:")
+    for name in registry.names():
+        tool = registry.get(name)
+        mark = " ⚠️dangerous" if tool.dangerous else ""
+        desc = tool.description.split(" — ")[0].split(". ")[0][:70]
+        print(f"  • {name}{mark} — {desc}")
+    print()
+
+
 if __name__ == "__main__":
-    main()
+    run_cli()

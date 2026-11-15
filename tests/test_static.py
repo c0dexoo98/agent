@@ -18,7 +18,7 @@ def test_imports():
     import system_prompt
     import tool_registry
 
-    assert hasattr(agent, "run_agent_task")
+    assert hasattr(agent, "run_cli") and hasattr(agent, "build_registry")
     assert hasattr(deepseek_client.DeepSeekClient, "send_message")
     assert hasattr(github_tools.GitHubTools, "validate_token")
     print("ok: imports")
