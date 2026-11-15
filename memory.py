@@ -25,22 +25,35 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import config
+from rag import SemanticIndex
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-class MemoryStore:
-    """حافظهٔ بلندمدت ماندگار ایجنت."""
+def _age_days(ts: str) -> float:
+    try:
+        dt = datetime.fromisoformat(str(ts))
+        return max(0.0, (datetime.now(timezone.utc) - (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc))).total_seconds() / 86400)
+    except Exception:
+        return 0.0
 
-    SECTIONS = ("facts", "lessons", "tasks", "notes")
+
+class MemoryStore:
+    """حافظهٔ بلندمدت ماندگار ایجنت — با Pin/Decay/Tags/بازتاب و نمایهٔ برداری."""
+
+    SECTIONS = ("facts", "lessons", "tasks", "notes", "reflections")
+    DECAYABLE = ("facts", "lessons", "notes")  # بخش‌های مشمول فراموشی هوشمند
 
     def __init__(self, memory_dir: Optional[Path] = None) -> None:
         self.dir = Path(memory_dir or config.MEMORY_DIR)
         self.path = self.dir / "memory.json"
         self._lock = threading.RLock()
         self._data: Dict[str, List[Dict[str, Any]]] = {s: [] for s in self.SECTIONS}
+        self._archived: List[Dict[str, Any]] = []
+        # نمایهٔ برداری سبک برای بازیابی معنایی (اختیاری با RAG_ENABLED)
+        self._index = SemanticIndex(self.dir / "index.json") if config.RAG_ENABLED else None
         self._load()
 
     # ------------------------------------------------------------------
@@ -55,6 +68,7 @@ class MemoryStore:
             for section in self.SECTIONS:
                 items = raw.get(section, [])
                 self._data[section] = items if isinstance(items, list) else []
+            self._archived = raw.get("archived", []) if isinstance(raw.get("archived", []), list) else []
         except Exception as e:
             # حافظهٔ خراب نباید ایجنت را ببندد — از نو شروع می‌کنیم و بکاپ می‌گذاریم
             try:
@@ -62,30 +76,41 @@ class MemoryStore:
             except Exception:
                 pass
             print(f"⚠️ حافظه قابل خواندن نبود ({e}) — بکاپ گرفته شد و از نو شروع شد.")
+        self._index_rebuild_if_empty()
+        if config.MEMORY_DECAY_ENABLED:
+            self.decay()
 
     def save(self) -> None:
         """ذخیرهٔ اتمیک: اول در فایل موقت، بعد جایگزینی اتمی."""
         with self._lock:
             self.dir.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(".tmp")
+            payload = dict(self._data)
+            payload["archived"] = self._archived
             tmp.write_text(
-                json.dumps(self._data, ensure_ascii=False, indent=1),
+                json.dumps(payload, ensure_ascii=False, indent=1),
                 encoding="utf-8",
             )
             tmp.replace(self.path)
+            if self._index is not None:
+                self._index.save()
 
     # ------------------------------------------------------------------
     # افزودن آیتم
     # ------------------------------------------------------------------
 
-    def add_fact(self, text: str) -> Dict[str, Any]:
-        return self._add("facts", text, config.MEMORY_MAX_FACTS)
+    def add_fact(self, text: str, tags: Optional[List[str]] = None) -> Dict[str, Any]:
+        return self._add("facts", text, config.MEMORY_MAX_FACTS, tags)
 
-    def add_lesson(self, text: str) -> Dict[str, Any]:
-        return self._add("lessons", text, config.MEMORY_MAX_LESSONS)
+    def add_lesson(self, text: str, tags: Optional[List[str]] = None) -> Dict[str, Any]:
+        return self._add("lessons", text, config.MEMORY_MAX_LESSONS, tags)
 
-    def add_note(self, text: str) -> Dict[str, Any]:
-        return self._add("notes", text, 200)
+    def add_note(self, text: str, tags: Optional[List[str]] = None) -> Dict[str, Any]:
+        return self._add("notes", text, 200, tags)
+
+    def add_reflection(self, text: str) -> Dict[str, Any]:
+        """بازتاب پس از تسک (SELF-REFLECT): چه خوب پیش رفت / چه چیزی اصلاح شود."""
+        return self._add("reflections", text, 100)
 
     def add_task_record(
         self,
@@ -111,10 +136,11 @@ class MemoryStore:
             self.save()
         return rec
 
-    def _add(self, section: str, text: str, cap: int) -> Dict[str, Any]:
+    def _add(self, section: str, text: str, cap: int, tags: Optional[List[str]] = None) -> Dict[str, Any]:
         text = (text or "").strip()
         if not text:
             return {"ok": False, "error": "متن خالی است"}
+        clean_tags = [t.strip().lower()[:24] for t in (tags or []) if t and t.strip()][:6]
         with self._lock:
             items = self._data[section]
             # جلوگیری از تکرار دقیق
@@ -122,14 +148,117 @@ class MemoryStore:
                 if it.get("text") == text:
                     it["hits"] = int(it.get("hits", 0)) + 1
                     it["updated"] = _now_iso()
+                    if clean_tags:
+                        merged = list(dict.fromkeys((it.get("tags") or []) + clean_tags))
+                        it["tags"] = merged[:6]
+                    if self._index is not None:
+                        self._index.add(f"{section}:{it['id']}", text)
                     self.save()
                     return {"ok": True, "dedup": True, "item": it}
-            item = {"id": int(time.time() * 1000), "text": text, "ts": _now_iso(), "hits": 0}
+            item = {"id": int(time.time() * 1000), "text": text, "ts": _now_iso(), "hits": 0,
+                    "pinned": False, "tags": clean_tags}
             items.append(item)
             if len(items) > cap:
                 del items[: len(items) - cap]
+            if self._index is not None:
+                self._index.add(f"{section}:{item['id']}", text)
             self.save()
         return {"ok": True, "item": item}
+
+    # ------------------------------------------------------------------
+    # Pin / Tag / حذف / فراموشی هوشمند
+    # ------------------------------------------------------------------
+
+    def _find(self, section: str, item_id: int) -> Optional[Dict[str, Any]]:
+        for it in self._data.get(section, []):
+            if int(it.get("id", 0)) == int(item_id):
+                return it
+        return None
+
+    def set_pinned(self, section: str, item_id: int, pinned: bool) -> Dict[str, Any]:
+        with self._lock:
+            it = self._find(section, item_id)
+            if not it:
+                return {"ok": False, "error": "آیتم یافت نشد"}
+            it["pinned"] = bool(pinned)
+            self.save()
+        return {"ok": True, "item": {"id": it["id"], "pinned": it["pinned"]}}
+
+    def set_tags(self, section: str, item_id: int, tags: List[str]) -> Dict[str, Any]:
+        with self._lock:
+            it = self._find(section, item_id)
+            if not it:
+                return {"ok": False, "error": "آیتم یافت نشد"}
+            it["tags"] = [t.strip().lower()[:24] for t in (tags or []) if t and t.strip()][:6]
+            self.save()
+        return {"ok": True, "tags": it["tags"]}
+
+    def delete_item(self, section: str, item_id: int) -> Dict[str, Any]:
+        with self._lock:
+            items = self._data.get(section, [])
+            for i, it in enumerate(items):
+                if int(it.get("id", 0)) == int(item_id):
+                    del items[i]
+                    if self._index is not None:
+                        self._index.remove(f"{section}:{item_id}")
+                    self.save()
+                    return {"ok": True}
+        return {"ok": False, "error": "آیتم یافت نشد"}
+
+    def decay(self, max_age_days: Optional[int] = None) -> Dict[str, int]:
+        """فراموشی هوشمند: بدون استفاده و کهنه (و بدون Pin) → آرشیو؛ سرآخر پرامپت سبک می‌ماند."""
+        days = int(max_age_days or config.MEMORY_DECAY_DAYS)
+        moved = 0
+        with self._lock:
+            for section in self.DECAYABLE:
+                keep: List[Dict[str, Any]] = []
+                for it in self._data[section]:
+                    if (not it.get("pinned")) and int(it.get("hits", 0)) == 0 and _age_days(it.get("ts")) > days:
+                        self._archived.append({**it, "archived_from": section, "archived_at": _now_iso()})
+                        if self._index is not None:
+                            self._index.remove(f"{section}:{it.get('id')}")
+                        moved += 1
+                    else:
+                        keep.append(it)
+                self._data[section] = keep
+            if moved:
+                self.save()
+        return {"moved": moved}
+
+    def archived_items(self, limit: int = 50) -> List[Dict[str, Any]]:
+        with self._lock:
+            return list(reversed(self._archived))[: max(1, int(limit))]
+
+    def restore_archived(self, item_ts: str) -> Dict[str, Any]:
+        """بازگرداندن یک آیتم آرشیو‌شده به بخش اصلی‌اش."""
+        with self._lock:
+            for i, it in enumerate(self._archived):
+                if it.get("ts") == item_ts:
+                    section = it.get("archived_from", "notes")
+                    it.pop("archived_from", None)
+                    it.pop("archived_at", None)
+                    self._data.get(section, self._data["notes"]).append(it)
+                    del self._archived[i]
+                    if self._index is not None:
+                        self._index.add(f"{section}:{it.get('id')}", it.get("text", ""))
+                    self.save()
+                    return {"ok": True, "section": section}
+        return {"ok": False, "error": "آیتم آرشیو یافت نشد"}
+
+    # ------------------------------------------------------------------
+    # نمایهٔ برداری
+    # ------------------------------------------------------------------
+
+    def _index_rebuild_if_empty(self) -> None:
+        """اگر نمایه خالی ولی حافظه پُر است (مثلاً مهاجرت پروژه قدیمی) → بازسازی."""
+        if self._index is None:
+            return
+        with self._lock:
+            if self._index._n > 0:
+                return
+            for section in ("facts", "lessons", "notes", "reflections"):
+                for it in self._data[section]:
+                    self._index.add(f"{section}:{it.get('id')}", it.get("text", ""))
 
     def bump(self, section: str, item_id: int) -> None:
         """افزایش شمارندهٔ استفاده (آیتم‌های پرکاربرد در recall بالاتر می‌آیند)."""
@@ -172,27 +301,59 @@ class MemoryStore:
         limit: int = 5,
         min_score: float = 0.15,
     ) -> List[Dict[str, Any]]:
-        """جستجوی امتیازمحور؛ مرتب‌سازی بر اساس (امتیاز، تعداد استفاده، تازگی)."""
+        """جستجوی ترکیبی: کلیدواژه‌ای + برداری (RAG) — مرتب‌سازی بر اساس امتیازِ آمیخته.
+
+        امتیاز نهایی = 0.65×کلیدواژه + 0.35×شباهت کسینوسی + پاداشِ Pin/استفاده/تازگی.
+        """
         qtokens = self._tokenize(query)
         sections = sections or ["facts", "lessons", "notes"]
-        results: List[Dict[str, Any]] = []
+        results: Dict[int, Dict[str, Any]] = {}
         with self._lock:
             for sec in sections:
                 for idx, it in enumerate(self._data.get(sec, [])):
-                    score = self._score(qtokens, it.get("text", ""))
-                    if score >= min_score:
-                        results.append(
-                            {
-                                "section": sec,
-                                "text": it.get("text"),
-                                "score": round(score, 3),
-                                "hits": int(it.get("hits", 0)),
-                                "recency": idx,  # بزرگ‌تر = تازه‌تر
-                                "ts": it.get("ts"),
-                            }
-                        )
-        results.sort(key=lambda r: (r["score"], r["hits"], r["recency"]), reverse=True)
-        return results[: max(1, int(limit))]
+                    kw = self._score(qtokens, it.get("text", ""))
+                    if kw >= min_score:
+                        results[int(it["id"])] = {
+                            "section": sec,
+                            "id": it.get("id"),
+                            "text": it.get("text"),
+                            "kw_score": round(kw, 3),
+                            "sem_score": 0.0,
+                            "hits": int(it.get("hits", 0)),
+                            "recency": idx,
+                            "ts": it.get("ts"),
+                            "pinned": bool(it.get("pinned")),
+                            "tags": it.get("tags") or [],
+                        }
+            # لایهٔ برداری — اسنادی که کلیدواژه‌ای نمی‌گرفت ولی معنایی نزدیک‌اند
+            if self._index is not None:
+                for hit in self._index.search(query, k=max(10, limit * 3)):
+                    sec, _, iid = hit["id"].partition(":")
+                    if sec not in sections or iid == "":
+                        continue
+                    it = self._find(sec, int(iid)) if hasattr(self, "_find") else None
+                    if it is None:
+                        continue
+                    item_id = int(it["id"])
+                    if item_id in results:
+                        results[item_id]["sem_score"] = round(hit["score"], 3)
+                    else:
+                        results[item_id] = {
+                            "section": sec, "id": it.get("id"), "text": it.get("text"),
+                            "kw_score": 0.0, "sem_score": round(hit["score"], 3),
+                            "hits": int(it.get("hits", 0)), "recency": 0, "ts": it.get("ts"),
+                            "pinned": bool(it.get("pinned")), "tags": it.get("tags") or [],
+                        }
+        merged = [r for r in results.values() if (r["kw_score"] >= min_score or r["sem_score"] > 0.0)]
+        for r in merged:
+            r["score"] = round(
+                0.65 * r["kw_score"] + 0.35 * min(1.0, r["sem_score"] * 2)
+                + (0.25 if r["pinned"] else 0.0)
+                + min(0.1, r["hits"] * 0.02),
+                3,
+            )
+        merged.sort(key=lambda r: (r["score"], r["hits"], r["recency"]), reverse=True)
+        return merged[: max(1, int(limit))]
 
     def recent_tasks(self, limit: int = 5) -> List[Dict[str, Any]]:
         with self._lock:
@@ -229,25 +390,37 @@ class MemoryStore:
     # ------------------------------------------------------------------
 
     def build_context(self, task: str) -> str:
-        """زمینهٔ متنی حافظهٔ مرتبط با تسک — در شروع هر تسک به پرامپت اضافه می‌شود.
+        """زمینهٔ متنی حافظهٔ مرتبط با تسک — Pin شده‌ها همیشه اول، بعد ترکیب کلیدواژه+RAG.
 
-        حقایق هسته‌ای: اگر جستجو چیزی مطابق نبود، هم ۲ حقیقت تازه‌ترین/پراستفاده‌ترین
-        تزریق می‌شوند تا «همیشه یادش بماند».
+        اگر جستجو چیزی نیافت، ۲ حقیقتِ تازه‌ترین/پراستفاده‌ترین تزریق می‌شود تا
+        «همیشه یادش بماند». بازتاب‌های اخیر هم برای اصلاح رفتار تزریق می‌شوند.
         """
         parts: List[str] = []
         facts = self.search(task, sections=["facts"], limit=config.MEMORY_INJECT_FACTS)
+        with self._lock:
+            pinned = [f for f in self._data["facts"] if f.get("pinned")]
+            existing = {f["text"] for f in facts}
+        for it in reversed(pinned[-4:]):
+            if it["text"] not in existing:
+                facts.insert(0, {"section": "facts", "id": it.get("id"), "text": it["text"], "score": 1.0,
+                                 "hits": int(it.get("hits", 0)), "recency": 0, "pinned": True, "tags": it.get("tags") or []})
+                existing.add(it["text"])
         if len(facts) < 2:
             with self._lock:
-                existing = {f["text"] for f in facts}
                 core = [self._data["facts"][i] for i in range(max(0, len(self._data["facts"]) - 2), len(self._data["facts"]))]
                 core = list(reversed(core))
             for it in core:
                 if it.get("text") and it["text"] not in existing:
-                    facts.append({"section": "facts", "text": it["text"], "score": 0, "hits": int(it.get("hits", 0)), "recency": 0, "ts": it.get("ts")})
+                    facts.append({"section": "facts", "id": it.get("id"), "text": it["text"], "score": 0,
+                                  "hits": int(it.get("hits", 0)), "recency": 0, "pinned": bool(it.get("pinned")), "tags": it.get("tags") or []})
             facts = facts[: max(2, config.MEMORY_INJECT_FACTS)]
         if facts:
-            lines = "\n".join(f"- {f['text']}" for f in facts)
-            parts.append(f"USER/PROJECT FACTS (always remember):\n{lines}")
+            def _fmt(f: Dict[str, Any]) -> str:
+                tag = f" [#{';'.join(f['tags'])}]" if f.get("tags") else ""
+                pin = " 📌" if f.get("pinned") else ""
+                return f"- {f['text']}{tag}{pin}"
+            lines = "\n".join(_fmt(f) for f in facts)
+            parts.append(f"USER/PROJECT FACTS (always remember; 📌 = pinned by user):\n{lines}")
         lessons = self.search(task, sections=["lessons"], limit=config.MEMORY_INJECT_LESSONS)
         if lessons:
             lines = "\n".join(f"- {l['text']}" for l in lessons)
@@ -259,6 +432,11 @@ class MemoryStore:
                 for t in tasks
             )
             parts.append(f"RECENT TASKS (avoid repeating failed approaches):\n{lines}")
+        with self._lock:
+            reflections = list(self._data["reflections"])[-2:]
+        if reflections:
+            lines = "\n".join(f"- {r['text'][:220]}" for r in reversed(reflections))
+            parts.append(f"YOUR RECENT SELF-REFLECTIONS (apply these improvements):\n{lines}")
         if not parts:
             return ""
         return "\n\n=== MEMORY CONTEXT (persistent, learned in previous sessions) ===\n" + "\n\n".join(parts)
@@ -277,25 +455,27 @@ def register_memory_tools(registry: Any, mem: MemoryStore) -> None:
         name="save_memory",
         description=(
             "ذخیرهٔ ماندگار یک آیتم در حافظهٔ ایجنت. section: "
-            "fact (حقیقت/ترجیح پایدار)، lesson (درس از خطا)، note (یادداشت آزاد)"
+            "fact (حقیقت/ترجیح پایدار)، lesson (درس از خطا)، note (یادداشت آزاد). "
+            "tags اختیاری برای دسته‌بندی (مثلاً [\"git\", \"priority\"])"
         ),
         parameters={
             "type": "object",
             "properties": {
                 "section": {"type": "string", "enum": ["fact", "lesson", "note"]},
                 "text": {"type": "string"},
+                "tags": {"type": "array", "items": {"type": "string"}},
             },
             "required": ["section", "text"],
         },
-        func=lambda section, text: (
-            mem.add_fact(text) if section == "fact"
-            else mem.add_lesson(text) if section == "lesson"
-            else mem.add_note(text)
+        func=lambda section, text, tags=None: (
+            mem.add_fact(text, tags) if section == "fact"
+            else mem.add_lesson(text, tags) if section == "lesson"
+            else mem.add_note(text, tags)
         ),
     )
     R(
         name="search_memory",
-        description="جستجوی کلیدواژه‌ای در حافظهٔ ماندگار (حقایق، درس‌ها، یادداشت‌ها)",
+        description="جستجوی ترکیبی (کلیدواژه + برداری) در حافظهٔ ماندگار",
         parameters={
             "type": "object",
             "properties": {
@@ -315,4 +495,79 @@ def register_memory_tools(registry: Any, mem: MemoryStore) -> None:
             "required": [],
         },
         func=lambda limit=5: {"ok": True, "tasks": mem.recent_tasks(limit)},
+    )
+    R(
+        name="pin_memory",
+        description="سنجاق کردن یک آیتم حافظه (fact/note/lesson) — همیشه در پرامپت تزریق می‌شود و مشمول فراموشی نمی‌شود",
+        parameters={
+            "type": "object",
+            "properties": {
+                "section": {"type": "string", "enum": ["fact", "lesson", "note"]},
+                "item_id": {"type": "integer", "description": "شناسهٔ آیتم — از search_memory/all_memory"},
+            },
+            "required": ["section", "item_id"],
+        },
+        func=lambda section, item_id: mem.set_pinned(
+            {"fact": "facts", "lesson": "lessons", "note": "notes"}[section], int(item_id), True
+        ),
+    )
+    R(
+        name="unpin_memory",
+        description="برداشتن سنجاق از یک آیتم حافظه",
+        parameters={
+            "type": "object",
+            "properties": {
+                "section": {"type": "string", "enum": ["fact", "lesson", "note"]},
+                "item_id": {"type": "integer"},
+            },
+            "required": ["section", "item_id"],
+        },
+        func=lambda section, item_id: mem.set_pinned(
+            {"fact": "facts", "lesson": "lessons", "note": "notes"}[section], int(item_id), False
+        ),
+    )
+    R(
+        name="tag_memory",
+        description="تعیین/بازنویسی تگ‌های یک آیتم حافظه برای دسته‌بندی و فیلتر",
+        parameters={
+            "type": "object",
+            "properties": {
+                "section": {"type": "string", "enum": ["fact", "lesson", "note"]},
+                "item_id": {"type": "integer"},
+                "tags": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["section", "item_id", "tags"],
+        },
+        func=lambda section, item_id, tags: mem.set_tags(
+            {"fact": "facts", "lesson": "lessons", "note": "notes"}[section], int(item_id), tags or []
+        ),
+    )
+    R(
+        name="delete_memory_item",
+        description="حذف یک آیتم اشتباه/کهنه از حافظه (fact/lesson/note)",
+        parameters={
+            "type": "object",
+            "properties": {
+                "section": {"type": "string", "enum": ["fact", "lesson", "note"]},
+                "item_id": {"type": "integer"},
+            },
+            "required": ["section", "item_id"],
+        },
+        func=lambda section, item_id: mem.delete_item(
+            {"fact": "facts", "lesson": "lessons", "note": "notes"}[section], int(item_id)
+        ),
+    )
+    R(
+        name="all_memory",
+        description="فهرست کامل یک بخش حافظه با idها (برای pin/tag/delete) — بخش‌ها: facts/lessons/notes/reflections",
+        parameters={
+            "type": "object",
+            "properties": {"section": {"type": "string", "enum": ["facts", "lessons", "notes", "reflections"]}},
+            "required": ["section"],
+        },
+        func=lambda section: {"ok": True, "items": [
+            {"id": i.get("id"), "text": (i.get("text") or "")[:160], "pinned": bool(i.get("pinned")),
+             "tags": i.get("tags") or [], "hits": int(i.get("hits", 0)), "ts": i.get("ts")}
+            for i in mem.all_items(section)
+        ]},
     )

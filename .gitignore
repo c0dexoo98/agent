@@ -17,3 +17,15 @@ venv/
 # ── دادهٔ محلی ایجنت (حافظه و مهارت‌های آموخته‌شده) ──
 memory/
 skills_learned/
+
+# ── دادهٔ محلی v4 (ممیزی/مصرف/سندباکس/snapshot/export/چک‌پوینت/اتوماسیون) ──
+audit/
+workspace/
+exports/
+snapshots/
+checkpoints/
+jobs.json
+watches.json
+approvals.json
+notifications.json
+usage.json

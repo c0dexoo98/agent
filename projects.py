@@ -162,11 +162,44 @@ class ProjectManager:
                 "created": _now_iso(),
                 "last_used": _now_iso(),
                 "task_count": 0,
+                "persona": "",                 # شخصیت/دستورالعمل اختصاصی پروژه
+                "settings": {"allow_dangerous": False, "tool_groups": []},  # [] = همهٔ گروه‌ها
             }
             self._data["projects"].append(rec)
             self._data["active_key"] = rec["key"]  # ساخت = انتخاب خودکار
             self._save()
         return rec
+
+    def save(self) -> None:
+        """ذخیرهٔ صریح فایل پروژه‌ها (برای import/persona از بیرون)."""
+        with self._lock:
+            self._save()
+
+    def set_persona(self, project_id: int, persona: str) -> Dict[str, Any]:
+        """شخصیت/دستورالعمل همیشگی پروژه — در پرامپت سیستمی همهٔ تسک‌ها تزریق می‌شود."""
+        with self._lock:
+            rec = self.get(project_id)
+            if "error" in rec:
+                return rec
+            rec["persona"] = (persona or "").strip()[:2000]
+            rec["last_used"] = _now_iso()
+            self._save()
+        return {"ok": True, "id": rec["id"], "persona": rec["persona"]}
+
+    def set_settings(self, project_id: int, settings: Dict[str, Any]) -> Dict[str, Any]:
+        """تنظیمات پروژه: allow_dangerous (عبور از تایید؟) و tool_groups (گروه‌های مجاز)."""
+        with self._lock:
+            rec = self.get(project_id)
+            if "error" in rec:
+                return rec
+            cur = rec.get("settings") or {}
+            if "allow_dangerous" in settings:
+                cur["allow_dangerous"] = bool(settings["allow_dangerous"])
+            if "tool_groups" in settings:
+                cur["tool_groups"] = [str(g) for g in (settings["tool_groups"] or []) if str(g).strip()]
+            rec["settings"] = cur
+            self._save()
+        return {"ok": True, "settings": rec["settings"]}
 
     def delete(self, project_id: int) -> Dict[str, Any]:
         """حذف پروژه + بازچینش آیدی‌ها (آیدی بعدی جایگزین حذف‌شده می‌شود).

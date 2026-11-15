@@ -140,8 +140,9 @@ def main() -> None:
         server.server_close()
         t.join(timeout=5)
 
-    # ۷) پرچم آماده بودن دیپ‌سیک پایین → تسک باید رد شود
+    # ۷) پرچم آماده بودن دیپ‌سیک پایین + بدون مغز → تسک باید رد شود
     srv.STATE.deepseek_ready = False
+    srv.STATE.engine.brain = None
     srv2 = srv.serve(open_browser=False)
     t2 = threading.Thread(target=srv2.serve_forever, daemon=True)
     t2.start()

@@ -110,3 +110,59 @@ AUTO_LEARN_LESSON: bool = _bool("AUTO_LEARN_LESSON", "true")
 # حداکثر مهارت‌های مرتبطی که ابتدای هر تسک به پرامپت تزریق می‌شود
 SKILLS_INJECT_LIMIT: int = int(os.getenv("SKILLS_INJECT_LIMIT", "3"))
 
+# ---------------------------------------------------------------------------
+# v4 — حافظهٔ هوشمند: RAG / Pin / Decay
+# ---------------------------------------------------------------------------
+
+# جستجوی برداری سبک (TF-IDF + کسینوس) علاوه بر جستجوی کلیدواژه‌ای
+RAG_ENABLED: bool = _bool("RAG_ENABLED", "true")
+
+# فراموشی هوشمند: آیتم‌های بدون استفاده و کهنه → آرشیو (از context حذف می‌شوند)
+MEMORY_DECAY_ENABLED: bool = _bool("MEMORY_DECAY_ENABLED", "true")
+MEMORY_DECAY_DAYS: int = int(os.getenv("MEMORY_DECAY_DAYS", "30"))
+
+# ---------------------------------------------------------------------------
+# v4 — امنیت: تایید انسانی / سندباکس / محدودسازی نرخ
+# ---------------------------------------------------------------------------
+
+# ابزارهای خطرناک قبل از اجرا باید در UI تایید شوند؟
+APPROVAL_REQUIRED: bool = _bool("APPROVAL_REQUIRED", "true")
+# چند ثانیه موتور منتظر تصمیم کاربر بماند (پس از آن «تایم‌اوت» به مدل می‌رود)
+APPROVAL_TIMEOUT: int = int(os.getenv("APPROVAL_TIMEOUT", "180"))
+# عمر درخواست‌های تایید بی‌پاسخ در صف
+APPROVAL_TTL: int = int(os.getenv("APPROVAL_TTL", "600"))
+
+# سقف‌های سندباکس اجرای کد
+SANDBOX_TIMEOUT: int = int(os.getenv("SANDBOX_TIMEOUT", "30"))
+SANDBOX_MAX_OUTPUT: int = int(os.getenv("SANDBOX_MAX_OUTPUT", "8000"))
+
+# محدودسازی نرخ گیت‌هاب + بازتلاش
+RATELIMIT_GH_PER_MIN: float = float(os.getenv("RATELIMIT_GH_PER_MIN", "60"))
+RETRY_MAX_ATTEMPTS: int = int(os.getenv("RETRY_MAX_ATTEMPTS", "3"))
+
+# ---------------------------------------------------------------------------
+# v4 — ایجنت: بازتاب / زیرایجنت / چک‌پوینت
+# ---------------------------------------------------------------------------
+
+# پس از هر تسک، مدل یک بازتاب کوتاه (چه خوب شد/چه بد شد) در حافظه ثبت کند؟
+REFLECTION_ENABLED: bool = _bool("REFLECTION_ENABLED", "true")
+# سقف دورهای حلقهٔ زیرایجنت در delegate_subtask
+SUBAGENT_MAX_ROUNDS: int = int(os.getenv("SUBAGENT_MAX_ROUNDS", "6"))
+
+# ذخیرهٔ چک‌پوینت در پایان هر دور (برای Resume بعد از قطعی)
+CHECKPOINTS_ENABLED: bool = _bool("CHECKPOINTS_ENABLED", "true")
+
+# ---------------------------------------------------------------------------
+# v4 — اتوماسیون و مسیرهای داده
+# ---------------------------------------------------------------------------
+
+SCHEDULER_ENABLED: bool = _bool("SCHEDULER_ENABLED", "true")
+WATCHER_ENABLED: bool = _bool("WATCHER_ENABLED", "true")
+WATCH_INTERVAL_DEFAULT: int = int(os.getenv("WATCH_INTERVAL_DEFAULT", "300"))
+
+WORKSPACE_DIR: Path = Path(os.getenv("WORKSPACE_DIR", str(BASE_DIR / "workspace"))).expanduser().resolve()
+EXPORTS_DIR: Path = Path(os.getenv("EXPORTS_DIR", str(BASE_DIR / "exports"))).expanduser().resolve()
+SNAPSHOTS_DIR: Path = Path(os.getenv("SNAPSHOTS_DIR", str(BASE_DIR / "snapshots"))).expanduser().resolve()
+AUDIT_DIR: Path = Path(os.getenv("AUDIT_DIR", str(BASE_DIR / "audit"))).expanduser().resolve()
+CHECKPOINTS_DIR: Path = Path(os.getenv("CHECKPOINTS_DIR", str(BASE_DIR / "checkpoints"))).expanduser().resolve()
+

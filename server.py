@@ -1,16 +1,15 @@
 # -*- coding: utf-8 -*-
-"""سرور DevX — بک‌اند رابط وب ایجنت (فقط کتابخانهٔ استاندارد، بدون وابستگی).
+"""سرور DevX v4 — بک‌اند کامل رابط وب ایجنت (کتابخانهٔ استاندارد، بدون فریم‌ورک).
 
 معماری:
-  * ThreadingHTTPServer + SSE (Server-Sent Events) برای استریم زندهٔ رویدادهای
-    موتور به رابط (بدون WebSocket و بدون فریم‌ورک).
-  * توکن گیت‌هاب از UI دریافت (POST /api/token)، با GET /user اعتبارسنجی و
-    فقط در حافظهٔ همین فرایند نگه داشته می‌شود — هرگز لاگ/فایل نمی‌شود.
-  * موتور ایجنت (agent_loop.AgentEngine) در نخ پس‌زمینه اجرا می‌شود و همهٔ
-    رویدادها (دورها، ابزارها، یادگیری مهارت) زنده به UI استریم می‌شود.
-  * DeepSeek: connector پس‌زمینه‌ای مرورگر را راه می‌اندازد و وضعیت لاگین را
-    به UI می‌فرستد؛ اگر لاگین نبود، UI پنل چشمک‌زن هشدار می‌دهد و کاربر
-    می‌تواند با POST /api/deepseek/login پنجرهٔ مرئی برای ورود دستی باز کند.
+  * ThreadingHTTPServer + SSE برای استریم زندهٔ رویدادها (بدون WebSocket و بدون وابستگی)
+  * چندسشن موازی: هر سشن یک AgentEngine مستقل با حافظهٔ مشترک پروژه؛ اجرا روی
+    مغزِ مشترک با Semaphore سریال می‌شود (یک مرورگر دیپ‌سیک = یک تسک همزمان).
+  * رویدادها با session_id/project مُهر می‌شوند و UI فیلتر می‌کند.
+  * زیرساخت v4: Audit زنجیرهٔ هش، Usage، Approval (انسان در حلقه)، RateLimit+Backoff
+    روی گیت‌هاب، Scheduler، Webhook Watcher، TimeMachine، Export/Import،
+    Checkpoint/Resume، Persona هر پروژه، جستجوی سراسری، خط زمانی، اعلان‌ها.
+  * توکن گیت‌هاب فقط در حافظهٔ همین فرایند نگه داشته می‌شود — هرگز لاگ/فایل نمی‌شود.
 """
 from __future__ import annotations
 
@@ -22,70 +21,113 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from github import GithubException
 
+import bundles
 import config
+import globalsearch
+import timeline
 from agent_loop import AgentEngine, DeepSeekBrain, EventBus
+from approval import ApprovalManager
+from audit import AuditLog
 from builtin_tools import register_builtin_tools
+from checkpoint import CheckpointStore
 from deepseek_client import DeepSeekClient, LoginRequired
+from fs_tools import register_fs_tools
 from github_tools import GitHubTools, TokenInvalidError, register_github_tools
 from memory import MemoryStore, register_memory_tools
+from notifications import NotificationCenter
 from projects import ProjectManager
+from ratelimit import RateLimiter, harden_github_tools
+from sandbox import register_code_tools
+from scheduler import Scheduler
+from sessions import SessionManager
 from skills import SkillLibrary, register_skill_tools
+from timemachine import TimeMachine
 from tool_registry import ToolRegistry
+from usage import UsageTracker
+from web_tools import register_web_tools
+from webhooks import WebhookWatcher
 
 UI_FILE = Path(__file__).resolve().parent / "ui" / "index.html"
 
 
 class DevXState:
-    """وضعیت مشترک سرور: توکن، مرورگر دیپ‌سیک، موتور، پروژه‌ها، حافظه، مهارت‌ها.
-
-    هر پروژه حافظه/مهارت ایزولهٔ خودش را دارد؛ سوییچ پروژه یعنی سوییچ کامل
-    MemoryStore + SkillLibrary + رجیستری ابزارها + شناسنامهٔ موتور.
-    """
+    """وضعیت مشترک سرور v4: پروژه‌ها، سشن‌ها، موتورها، مغز، زیرساخت‌ها."""
 
     def __init__(self) -> None:
         self.bus = EventBus()
         self.projects = ProjectManager()
-        self.memory = self._memory_for(self.projects.active())
-        self.skills = self._skills_for(self.projects.active())
-        self.engine = AgentEngine(
-            brain=None,  # پس از اتصال دیپ‌سیک ست می‌شود
-            memory=self.memory,
-            skills=self.skills,
-            event_bus=self.bus,
-        )
-        self.engine.set_registry(self._make_registry(None, self.memory, self.skills))
-        self._sync_project_info()
+
+        # زیرساخت‌های v4
+        self.audit = AuditLog(config.AUDIT_DIR / "chain.jsonl")
+        self.usage = UsageTracker(config.BASE_DIR / "usage.json")
+        self.notifications = NotificationCenter(config.BASE_DIR / "notifications.json")
+        self.approvals = ApprovalManager(config.BASE_DIR / "approvals.json", ttl_s=config.APPROVAL_TTL)
+        self.timemachine = TimeMachine(config.SNAPSHOTS_DIR)
+        self.checkpoints = CheckpointStore(config.CHECKPOINTS_DIR)
+        self.rate_limiter = RateLimiter(config.RATELIMIT_GH_PER_MIN)
+        self.brain_sem = threading.Semaphore(1)   # مغز دیپ‌سیک = یک مرورگر → نوبتی
 
         self.gh_tools: Optional[GitHubTools] = None
         self.token_info: Optional[Dict[str, Any]] = None
-
         self.client: Optional[DeepSeekClient] = None
         self.brain: Optional[DeepSeekBrain] = None
+
+        # حافظه/مهارت ایزولهٔ پروژهٔ فعال + سشن‌ها
+        self.memory = self._memory_for(self.projects.active())
+        self.skills = self._skills_for(self.projects.active())
+        self.sessions = self._sessions_for(self.projects.active())
+        self._session_engines: Dict[int, AgentEngine] = {}
+
+        self.engine = self._build_engine(self._active_session_id())
+
+        self.client: Optional[DeepSeekClient] = None  # (placeholder نگه‌داشته‌شده برای سازگاری)
         self.deepseek_started = False
         self.deepseek_ready = False
         self.deepseek_message = "در انتظار راه‌اندازی مرورگر…"
         self._connector_lock = threading.Lock()
 
-        self.bus.subscribe(self._on_event)  # نقطهٔ اتصال برای واکنش‌های آینده به رویدادها
+        # اتوماسیون
+        self.scheduler = Scheduler(config.BASE_DIR / "jobs.json", fire_callback=self._on_job_fire)
+        self.watcher = WebhookWatcher(
+            config.BASE_DIR / "watches.json",
+            gh_provider=lambda: self.gh_tools,
+            on_change=self._on_watch_change,
+        )
+        if config.SCHEDULER_ENABLED:
+            self.scheduler.start()
+        if config.WATCHER_ENABLED:
+            self.watcher.start()
 
+        self.bus.subscribe(self._on_engine_event)
+        self.audit.append("server_started", {"version": "4.0"})
+
+    # ------------------------------------------------------------------
+    # کارخانه‌های پروژه‌محور
     # ------------------------------------------------------------------
 
     def _memory_for(self, project: Optional[Dict[str, Any]]) -> MemoryStore:
         """حافظهٔ ایزولهٔ یک پروژه (memory/projects/<key>/)."""
         if project:
             return MemoryStore(memory_dir=self.projects.memory_dir(project["key"]))
-        # بدون پروژهٔ فعال → حافظهٔ موقت خالی (تا کاربر نام پروژه را انتخاب کند)
         return MemoryStore(memory_dir=self.projects.memory_root / "projects" / "_unassigned")
 
     def _skills_for(self, project: Optional[Dict[str, Any]]) -> SkillLibrary:
-        """کتابخانهٔ مهارت ایزولهٔ یک پروژه (skills_learned/projects/<key>/)."""
         if project:
             return SkillLibrary(skills_dir=self.projects.skills_dir(project["key"]))
         return SkillLibrary(skills_dir=self.projects.skills_root / "projects" / "_unassigned")
+
+    def _sessions_for(self, project: Optional[Dict[str, Any]]) -> SessionManager:
+        if project:
+            return SessionManager(project["key"], self.projects.memory_dir(project["key"]))
+        return SessionManager("_unassigned", self.projects.memory_root / "projects" / "_unassigned")
+
+    def _active_session_id(self) -> Optional[int]:
+        s = self.sessions.active()
+        return s["id"] if s else None
 
     def _make_registry(self, gh_tools: Optional[GitHubTools], mem: MemoryStore, skills: SkillLibrary) -> ToolRegistry:
         registry = ToolRegistry()
@@ -93,91 +135,140 @@ class DevXState:
             register_github_tools(registry, gh_tools)
         register_memory_tools(registry, mem)
         register_skill_tools(registry, skills)
+        register_web_tools(registry)
+        workspace = config.WORKSPACE_DIR / str((self.projects.active() or {}).get("key") or "_unassigned")
+        register_fs_tools(registry, workspace)
+        register_code_tools(registry, workspace)
         register_builtin_tools(registry)
         self.projects.register_project_tools(registry)
+        # دروازهٔ تایید انسانی + ممیزی + پروژهٔ فعال
+        registry.approvals = self.approvals
+        registry.audit = self.audit
+        registry.approval_policy = self._approval_policy
+        registry.project_provider = lambda: (self.projects.active() or {}).get("id")
         return registry
 
+    def _approval_policy(self, tool_name: str) -> bool:
+        """سیاست تایید: پروژه با allow_dangerous=true از دروازه عبور می‌کند."""
+        p = self.projects.active() or {}
+        settings = p.get("settings") or {}
+        return not bool(settings.get("allow_dangerous"))
+
+    def _build_engine(self, session_id: Optional[int]) -> AgentEngine:
+        """موتور جدید برای یک سشن — حافظه/مهارت مشترک پروژه، رجیستری مستقل."""
+        engine = AgentEngine(
+            brain=self.brain,
+            memory=self.memory,
+            skills=self.skills,
+            event_bus=self.bus,
+            usage=self.usage,
+            checkpoints=self.checkpoints,
+        )
+        engine.set_registry(self._make_registry(self.gh_tools, self.memory, self.skills))
+        p = self.projects.active()
+        engine.set_project({"id": p["id"], "name": p["name"], "key": p["key"],
+                            "persona": p.get("persona", "")} if p else {})
+        engine.session_id = session_id
+        # ارث‌بری مغز: پس از سوییچ پروژه/سشن، مغزِ تزریق‌شده (دیف‌سیک یا تست) حفظ شود
+        if engine.brain is None:
+            prev = getattr(self, "engine", None)
+            if prev is not None and prev is not engine and prev.brain is not None:
+                engine.brain = prev.brain
+                engine.enable_streaming()
+        return engine
+
+    def _pub(self, rec: Dict[str, Any]) -> Dict[str, Any]:
+        return {k: rec[k] for k in ("id", "name", "created", "last_used", "task_count", "persona", "settings") if k in rec}
+
     def _sync_project_info(self) -> None:
-        """شناسنامهٔ پروژهٔ فعال → موتور (برای رویدادها و پرامپت)."""
         p = self.projects.active()
         self.engine.set_project(
-            {"id": p["id"], "name": p["name"], "key": p["key"]} if p else {}
+            {"id": p["id"], "name": p["name"], "key": p["key"], "persona": p.get("persona", "")} if p else {}
         )
 
     # ------------------------------------------------------------------
-    # مدیریت پروژه‌ها (آیدی فشرده + حافظهٔ ایزوله)
+    # مدیریت پروژه‌ها (مثل v3 + persona/settings)
     # ------------------------------------------------------------------
 
     def ensure_active_project(self) -> Dict[str, Any]:
-        """اگر هیچ پروژه‌ای فعال نیست، پروژهٔ پیش‌فرض بساز («پروژه N»)."""
         p = self.projects.active()
         if p:
             return p
-        rec = self.projects.create()  # نام پیش‌فرض: پروژه N
+        rec = self.projects.create()
         self._apply_active_project()
         self.bus.emit("project_created", project=self._pub(rec))
         self.bus.emit("project_switched", project=self._pub(rec))
         return rec
 
-    def _pub(self, rec: Dict[str, Any]) -> Dict[str, Any]:
-        """نسخهٔ عمومی رکورد پروژه (کلید پایدار داخلی افشا نشود)."""
-        return {k: rec[k] for k in ("id", "name", "created", "last_used", "task_count")}
-
     def create_project(self, name: str) -> Dict[str, Any]:
         name = (name or "").strip()
         if not name:
             return {"ok": False, "error": "نام پروژه را وارد کن"}
-        if self.engine.busy:
-            return {"ok": False, "error": "یک تسک در حال اجراست — بعداً پروژه بساز"}
         rec = self.projects.create(name)
         self._apply_active_project()
+        self.audit.append("project_created", {"name": name}, project=rec["id"])
         self.bus.emit("project_created", project=self._pub(rec))
         self.bus.emit("project_switched", project=self._pub(rec))
         return {"ok": True, "project": self._pub(rec)}
 
     def select_project(self, project_id: int) -> Dict[str, Any]:
-        if self.engine.busy:
-            return {"ok": False, "error": "یک تسک در حال اجراست — سوییچ بعد از پایان تسک"}
         res = self.projects.select(int(project_id))
         if not res.get("ok"):
             return res
         rec = res["project"]
         self._apply_active_project()
+        self.audit.append("project_switched", {"name": rec["name"]}, project=rec["id"])
         self.bus.emit("project_switched", project=self._pub(rec))
         return {"ok": True, "project": self._pub(rec)}
 
     def delete_project(self, project_id: int) -> Dict[str, Any]:
-        if self.engine.busy:
-            return {"ok": False, "error": "یک تسک در حال اجراست — حذف بعد از پایان تسک"}
         res = self.projects.delete(int(project_id))
         if not res.get("ok"):
             return res
-        # پس از حذف: اگر پروژهٔ فعال حذف شده، active_key به آخرین پروژه رفته — اعمال شود
         self._apply_active_project()
+        self.audit.append("project_deleted", {"name": res["deleted"]["name"]}, project=int(project_id))
         self.bus.emit("project_deleted", deleted=self._pub(res["deleted"]), projects=self.projects_list())
         self.bus.emit("projects_updated", projects=self.projects_list(), active=self._active_pub())
         return {"ok": True, "deleted": self._pub(res["deleted"]), "renumbered": True}
 
     def rename_project(self, project_id: int, name: str) -> Dict[str, Any]:
-        if self.engine.busy:
-            return {"ok": False, "error": "یک تسک در حال اجراست — بعداً تغییر نام بده"}
         res = self.projects.rename(int(project_id), name)
         if not res.get("ok"):
             return res
         self._sync_project_info()
         rec = self.projects.get(int(project_id))
+        self.audit.append("project_renamed", {"new": name}, project=int(project_id))
         self.bus.emit("projects_updated", projects=self.projects_list(), active=self._active_pub())
         return {"ok": True, "project": self._pub(rec)}
 
+    def set_persona(self, project_id: int, persona: str) -> Dict[str, Any]:
+        res = self.projects.set_persona(int(project_id), persona)
+        if not res.get("ok"):
+            return res
+        self._sync_project_info()
+        self._session_engines.clear()  # همهٔ موتورهای سشن persona جدید بگیرند
+        self.audit.append("persona_set", {"len": len(persona)}, project=int(project_id))
+        self.bus.emit("projects_updated", projects=self.projects_list(), active=self._active_pub())
+        return res
+
+    def set_project_settings(self, project_id: int, settings: Dict[str, Any]) -> Dict[str, Any]:
+        res = self.projects.set_settings(int(project_id), settings)
+        if not res.get("ok"):
+            return res
+        self._apply_active_project()  # رجیستری با سیاست جدید بازساخته شود
+        self.audit.append("project_settings", settings, project=int(project_id))
+        self.bus.emit("projects_updated", projects=self.projects_list(), active=self._active_pub())
+        return res
+
     def _apply_active_project(self) -> None:
-        """سوییچ کامل حافظه/مهارت/رجیستری به پروژهٔ فعال."""
+        """سوییچ کامل: حافظه/مهارت/سشن‌ها/موتورها/رجیستری به پروژهٔ فعال."""
         p = self.projects.active()
         self.memory = self._memory_for(p)
         self.skills = self._skills_for(p)
-        self.engine.memory = self.memory
-        self.engine.skills = self.skills
-        self.engine.set_registry(self._make_registry(self.gh_tools, self.memory, self.skills))
-        self._sync_project_info()
+        self.sessions = self._sessions_for(p)
+        self._session_engines = {}
+        self.engine = self._build_engine(self._active_session_id())
+        self.bus.emit("memory_updated", counts=self.memory.counts())
 
     def projects_list(self) -> List[Dict[str, Any]]:
         return [self._pub(p) for p in self.projects.list()]
@@ -186,17 +277,11 @@ class DevXState:
         p = self.projects.active()
         return self._pub(p) if p else None
 
-    def _on_event(self, event: str, item: Dict[str, Any]) -> None:
-        if event in ("memory_updated", "skill_learned", "lesson_learned"):
-            # اطمینان از ذخیرهٔ روی دیسک (ذخیرهٔ اصلی خودشان انجام می‌دهند؛ این فقط رویداد است)
-            pass
-
     # ------------------------------------------------------------------
-    # توکن گیت‌هاب
+    # توکن گیت‌هاب + محافظت نرخ
     # ------------------------------------------------------------------
 
     def set_token(self, token: str) -> Dict[str, Any]:
-        """اعتبارسنجی توکن و سیم‌کشی ابزارهای گیت‌هاب در رجیستری (توکن فقط حافظه)."""
         token = (token or "").strip()
         if not token.startswith("ghp_"):
             return {"ok": False, "error": "توکن باید یک Classic Token با پیشوند ghp_ باشد (github.com/settings/tokens)."}
@@ -207,21 +292,25 @@ class DevXState:
             return {"ok": False, "error": "توکن نامعتبر است (401 از GitHub) — دوباره توکن درستی وارد کن."}
         except GithubException as e:
             return {"ok": False, "error": f"خطای API گیت‌هاب ({e.status}) — بعداً تلاش کن."}
+        harden_github_tools(gh, self.rate_limiter, max_attempts=config.RETRY_MAX_ATTEMPTS)
         self.gh_tools = gh
         self.token_info = info
-        self.engine.set_registry(self._make_registry(gh, self.memory, self.skills))
+        self._rebuild_registries()
+        self.audit.append("github_token_set", {"login": info["login"]})
         self.bus.emit("token_state", set=True, login=info["login"], scopes=info["token_scopes"])
         return {"ok": True, "login": info["login"], "scopes": info["token_scopes"]}
 
+    def _rebuild_registries(self) -> None:
+        """رجیستری همهٔ موتورهای زنده با ابزارهای گیت‌هاب تازه بازساخته شود."""
+        self.engine.set_registry(self._make_registry(self.gh_tools, self.memory, self.skills))
+        for eng in self._session_engines.values():
+            eng.set_registry(self._make_registry(self.gh_tools, self.memory, self.skills))
+
     # ------------------------------------------------------------------
-    # connector دیپ‌سیک
+    # connector دیپ‌سیک (مثل v3 + استریم جزئی)
     # ------------------------------------------------------------------
 
     def connect_deepseek(self, visible_login: bool = False) -> None:
-        """راه‌اندازی مرورگر در نخ پس‌زمینه + اعلام وضعیت به UI.
-
-        visible_login=True → مرورگر مرئی باز می‌شود و تا ورود دستی کاربر صبر می‌کند.
-        """
         def connector() -> None:
             with self._connector_lock:
                 self.deepseek_started = False
@@ -272,42 +361,301 @@ class DevXState:
         self.deepseek_message = "اتصال برقرار است"
         self.brain = DeepSeekBrain(self.client)
         self.engine.brain = self.brain
+        self.engine.enable_streaming()
+        for eng in self._session_engines.values():
+            eng.brain = self.brain
+            eng.enable_streaming()
         self.bus.emit("deepseek_state", ready=True, message=self.deepseek_message)
 
     # ------------------------------------------------------------------
-    # اجرای تسک در پس‌زمینه
+    # سشن‌ها و اجرای تسک (چندسشن موازی)
     # ------------------------------------------------------------------
 
-    def start_task(self, task: str) -> Dict[str, Any]:
+    def _engine_for(self, session_id: Optional[int]) -> AgentEngine:
+        sid = session_id or self._active_session_id()
+        if sid == self._active_session_id() and self.engine.session_id == sid:
+            return self.engine
+        if sid not in self._session_engines:
+            eng = self._build_engine(sid)
+            self._session_engines[sid] = eng
+        return self._session_engines[sid]
+
+    def sessions_list(self) -> Dict[str, Any]:
+        return {"sessions": self.sessions.list(), "active_id": self.sessions.active_id()}
+
+    def create_session(self, title: str = "") -> Dict[str, Any]:
+        s = self.sessions.create(title)
+        self.audit.append("session_created", {"title": s["title"]})
+        self.bus.emit("sessions_updated", **self.sessions_list())
+        return {"ok": True, "session": s}
+
+    def select_session(self, session_id: int) -> Dict[str, Any]:
+        s = self.sessions.select(int(session_id))
+        if "error" in s:
+            return {"ok": False, "error": s["error"]}
+        self.bus.emit("sessions_updated", **self.sessions_list())
+        return {"ok": True, "session": s}
+
+    def rename_session(self, session_id: int, title: str) -> Dict[str, Any]:
+        res = self.sessions.rename(int(session_id), title)
+        if res.get("ok"):
+            self.bus.emit("sessions_updated", **self.sessions_list())
+        return res
+
+    def delete_session(self, session_id: int) -> Dict[str, Any]:
+        res = self.sessions.delete(int(session_id))
+        if res.get("ok"):
+            self._session_engines.pop(int(session_id), None)
+            self.bus.emit("sessions_updated", **self.sessions_list())
+        return res
+
+    def start_task(self, task: str, session_id: Optional[int] = None) -> Dict[str, Any]:
         task = (task or "").strip()
         if not task:
             return {"ok": False, "error": "متن تسک خالی است"}
-        if self.engine.busy:
-            return {"ok": False, "error": "یک تسک در حال اجراست — صبر کن تمام شود"}
-        if not self.deepseek_ready or self.engine.brain is None:
+        if not self.deepseek_ready and self.engine.brain is None:
             return {"ok": False, "error": self.deepseek_message or "دیپ‌سیک هنوز آماده نیست"}
 
-        # بدون پروژهٔ فعال؟ خودکار «پروژه N» ساخته می‌شود (آیدی در پس‌زمینه ثبت می‌شود)
         project = self.ensure_active_project()
+        if session_id is not None:
+            sel = self.sessions.select(int(session_id))
+            if "error" in sel:
+                return {"ok": False, "error": "سشن یافت نشد"}
+        engine = self._engine_for(self._active_session_id())
+        if engine.brain is None:
+            engine.brain = self.engine.brain  # مغز تازه‌وصل‌شده به سشن‌های قبلی هم برسد
+        if engine.brain is None:
+            return {"ok": False, "error": self.deepseek_message or "دیپ‌سیک هنوز آماده نیست"}
+        if engine.busy:
+            return {"ok": False, "error": "یک تسک در این سشن در حال اجراست — صبر کن تمام شود"}
+        sid = engine.session_id
         proj_key = project["key"]
 
         def worker() -> None:
             try:
-                report = self.engine.run_task(task)
-                # آمار پروژهٔ فعال به‌روز شود (تسک روی همان پروژه ثبت می‌شود)
+                with self.brain_sem:  # مغز مشترک → اجرای نوبتی
+                    report = engine.run_task(task)
                 self.projects.record_task(proj_key)
+                self.sessions.record_task(sid)
                 return report
             except Exception as e:  # noqa: BLE001
                 self.bus.emit("task_end", ok=False, answer=f"⛔ خطای موتور: {e}", rounds=0, tools=[], errors=1, duration_s=0)
 
         threading.Thread(target=worker, name="task-worker", daemon=True).start()
-        return {"ok": True, "started": True, "project": self._pub(project)}
+        self.audit.append("task_started", {"task": task[:160], "session": sid}, project=project["id"])
+        return {"ok": True, "started": True, "project": self._pub(project), "session_id": sid}
+
+    # ------------------------------------------------------------------
+    # تایید انسانی
+    # ------------------------------------------------------------------
+
+    def resolve_approval(self, approval_id: str, approved: bool) -> Dict[str, Any]:
+        res = self.approvals.resolve(str(approval_id), bool(approved))
+        if res.get("ok"):
+            item = res["item"]
+            self.audit.append("approval_resolved", {"approval_id": approval_id, "approved": bool(approved), "tool": item["tool"]})
+            self.notifications.push(
+                "approval", f"{'✅ تایید شد' if approved else '⛔ رد شد'}: {item['tool']}",
+                body=f"درخواست {approval_id}", project=item.get("project"),
+            )
+            self.bus.emit("approval_resolved", approval_id=approval_id, approved=bool(approved), tool=item["tool"])
+        return res
+
+    # ------------------------------------------------------------------
+    # اتوماسیون: زمان‌بند + نگهبان + اعلان‌ها
+    # ------------------------------------------------------------------
+
+    def _make_registry_for(self, gh_tools, mem, skills, rec) -> ToolRegistry:
+        """رجیستری برای پروژهٔ دلخواه (نه لزوماً فعال) — سیاست تایید همان پروژه."""
+        registry = ToolRegistry()
+        if gh_tools is not None:
+            register_github_tools(registry, gh_tools)
+        register_memory_tools(registry, mem)
+        register_skill_tools(registry, skills)
+        register_web_tools(registry)
+        register_fs_tools(registry, config.WORKSPACE_DIR / str(rec["key"]))
+        register_code_tools(registry, config.WORKSPACE_DIR / str(rec["key"]))
+        register_builtin_tools(registry)
+        self.projects.register_project_tools(registry)
+        registry.approvals = self.approvals
+        registry.audit = self.audit
+        registry.project_provider = lambda: rec["id"]
+        allow = bool((rec.get("settings") or {}).get("allow_dangerous"))
+        registry.approval_policy = lambda name: not allow
+        return registry
+
+    def _ephemeral_run(self, project_id: int, task: str, source: str) -> None:
+        """اجرای تسک در پس‌زمینه برای پروژهٔ مشخص (زمان‌بند/نگهبان)."""
+        rec = self.projects.get(int(project_id))
+        if "error" in rec:
+            self.notifications.push("system", f"پروژهٔ {project_id} برای {source} یافت نشد")
+            return
+        if not self.deepseek_ready or self.brain is None:
+            self.notifications.push("system", f"دیپ‌سیک آماده نیست — {source} اجرا نشد", body=task[:120], project=rec["id"])
+            return
+
+        mem = MemoryStore(memory_dir=self.projects.memory_dir(rec["key"]))
+        sk = SkillLibrary(skills_dir=self.projects.skills_dir(rec["key"]))
+        eng = AgentEngine(brain=self.brain, memory=mem, skills=sk, event_bus=self.bus,
+                          usage=self.usage, checkpoints=self.checkpoints)
+        eng.set_registry(self._make_registry_for(self.gh_tools, mem, sk, rec))
+        eng.set_project({"id": rec["id"], "name": rec["name"], "key": rec["key"], "persona": rec.get("persona", "")})
+
+        def worker() -> None:
+            try:
+                if not self.brain_sem.acquire(blocking=False):
+                    self.notifications.push("system", f"مغز مشغول است — {source} این‌بار اجرا نشد", project=rec["id"])
+                    return
+                try:
+                    report = eng.run_task(task)
+                finally:
+                    self.brain_sem.release()
+                self.projects.record_task(rec["key"])
+                self.notifications.push(
+                    "schedule" if source == "schedule" else "watch",
+                    f"{'⏰' if source == 'schedule' else '👀'} تسک خودکار تمام شد ({rec['name']})",
+                    body=(report.get("answer") or "")[:180], project=rec["id"],
+                )
+            except Exception as e:  # noqa: BLE001
+                self.notifications.push("system", f"خطای اجرای خودکار: {e}", project=rec["id"])
+
+        threading.Thread(target=worker, name=f"auto-{source}", daemon=True).start()
+
+    def _on_job_fire(self, job: Dict[str, Any]) -> None:
+        self.audit.append("schedule_fired", {"job": job["name"], "task": job["task"][:120]}, project=job["project_id"])
+        self.notifications.push("schedule", f"⏰ اجرای خودکار: {job['name']}", body=job["task"][:160], project=job["project_id"])
+        self._ephemeral_run(job["project_id"], job["task"], "schedule")
+
+    def _on_watch_change(self, watch: Dict[str, Any], change: Dict[str, Any]) -> None:
+        desc = json.dumps(change.get("to", change), ensure_ascii=False)[:200]
+        self.audit.append("watch_changed", {"repo": watch["repo"], "change": desc}, project=watch["project_id"])
+        self.notifications.push("watch", f"👀 تغییر در {watch['repo']}", body=desc, project=watch["project_id"])
+        self.bus.emit("watch_changed", repo=watch["repo"], change=change)
+        if watch.get("auto_task"):
+            task = str(watch["auto_task"]).replace("{{change}}", desc)
+            self._ephemeral_run(watch["project_id"], task, "watch")
+
+    # ------------------------------------------------------------------
+    # Snapshot / Export-Import / Resume / جستجو / خط زمانی
+    # ------------------------------------------------------------------
+
+    def snapshot_create(self, project_id: Optional[int], label: str) -> Dict[str, Any]:
+        rec = self.projects.get(int(project_id)) if project_id else self.projects.active()
+        if not rec or "error" in rec:
+            return {"ok": False, "error": "پروژه یافت نشد"}
+        extra = {"_project.json": json.dumps(self._pub(rec), ensure_ascii=False)}
+        res = self.timemachine.create(rec["key"], self.projects.memory_dir(rec["key"]),
+                                      self.projects.skills_dir(rec["key"]), label=label, extra_files=extra)
+        if res.get("ok"):
+            self.audit.append("snapshot_created", {"label": label}, project=rec["id"])
+            self.bus.emit("snapshot_created", project=rec["id"], label=label)
+        return res
+
+    def snapshot_restore(self, project_id: Optional[int], snapshot_id: str) -> Dict[str, Any]:
+        rec = self.projects.get(int(project_id)) if project_id else self.projects.active()
+        if not rec or "error" in rec:
+            return {"ok": False, "error": "پروژه یافت نشد"}
+        mdir = self.projects.memory_dir(rec["key"])
+        sdir = self.projects.skills_dir(rec["key"])
+        # قبل از رول‌بک، وضعیت فعلی هم snapshot شود (بازگشت دوباره ممکن بماند)
+        self.timemachine.create(rec["key"], mdir, sdir, label="auto-before-restore")
+        res = self.timemachine.restore(rec["key"], str(snapshot_id), mdir, sdir)
+        if res.get("ok"):
+            self.audit.append("snapshot_restored", {"snapshot": snapshot_id}, project=rec["id"])
+            if rec.get("id") == (self.projects.active() or {}).get("id"):
+                self._apply_active_project()
+            self.bus.emit("snapshot_restored", project=rec["id"], snapshot=snapshot_id)
+        return res
+
+    def project_export(self, project_id: Optional[int]) -> Dict[str, Any]:
+        rec = self.projects.get(int(project_id)) if project_id else self.projects.active()
+        if not rec or "error" in rec:
+            return {"ok": False, "error": "پروژه یافت نشد"}
+        res = bundles.export_project(rec, self.projects.memory_dir(rec["key"]),
+                                     self.projects.skills_dir(rec["key"]), config.EXPORTS_DIR)
+        if res.get("ok"):
+            self.audit.append("project_exported", {"file": res["name"]}, project=rec["id"])
+        return res
+
+    def project_import(self, zip_name: str) -> Dict[str, Any]:
+        path = (config.EXPORTS_DIR / str(zip_name)).resolve()
+        if config.EXPORTS_DIR.resolve() not in path.parents or not path.exists():
+            return {"ok": False, "error": "فایل بسته در exports یافت نشد"}
+        res = bundles.import_project(path, self.projects, self.projects.memory_root, self.projects.skills_root)
+        if res.get("ok"):
+            self._apply_active_project()
+            self.audit.append("import_done", {"name": path.name}, project=res["project"]["id"])
+            self.bus.emit("projects_updated", projects=self.projects_list(), active=self._active_pub())
+        return res
+
+    def resume_task(self, checkpoint_id: str) -> Dict[str, Any]:
+        cp = self.checkpoints.load(str(checkpoint_id))
+        if not cp:
+            return {"ok": False, "error": "چک‌پوینت یافت نشد"}
+        engine = self._engine_for(self._active_session_id())
+        if engine.brain is None:
+            return {"ok": False, "error": self.deepseek_message or "دیپ‌سیک هنوز آماده نیست"}
+        proj_id = (cp.get("project") or {}).get("id")
+        if proj_id and proj_id != (self.projects.active() or {}).get("id"):
+            sel = self.select_project(int(proj_id))
+            if not sel.get("ok"):
+                return sel
+        engine = self._engine_for(self._active_session_id())
+        if engine.busy:
+            return {"ok": False, "error": "یک تسک در حال اجراست"}
+
+        def worker() -> None:
+            try:
+                with self.brain_sem:
+                    engine.resume(str(checkpoint_id))
+            except Exception as e:  # noqa: BLE001
+                self.bus.emit("task_end", ok=False, answer=f"⛔ خطای resume: {e}", rounds=0, tools=[], errors=1, duration_s=0)
+
+        threading.Thread(target=worker, name="task-resume", daemon=True).start()
+        return {"ok": True, "resuming": checkpoint_id}
+
+    def global_search(self, query: str, kind: Optional[str] = None, project_id: Optional[int] = None) -> Dict[str, Any]:
+        return globalsearch.search_all(self.projects.list(), self.projects.memory_root,
+                                       self.projects.skills_root, query, kind=kind, project_id=project_id)
+
+    def build_timeline(self, project_id: Optional[int], limit: int = 80) -> Dict[str, Any]:
+        rec = self.projects.get(int(project_id)) if project_id else self.projects.active()
+        if not rec or "error" in rec:
+            return {"ok": False, "error": "پروژه یافت نشد"}
+        events = timeline.build_timeline(
+            rec["key"], self.projects.memory_dir(rec["key"]), self.projects.skills_dir(rec["key"]),
+            snapshots=self.timemachine.list(rec["key"]),
+            audit_entries=self.audit.list(limit=200, project=rec["id"]),
+            jobs=self.scheduler.list(project_id=rec["id"]),
+            limit=limit,
+        )
+        return {"ok": True, "project": self._pub(rec), "events": events}
+
+    # ------------------------------------------------------------------
+    # رویدادهای موتور → ممیزی + اعلان تایید
+    # ------------------------------------------------------------------
+
+    def _on_engine_event(self, event: str, item: Dict[str, Any]) -> None:
+        try:
+            if event in ("task_start", "task_end", "final", "skill_learned", "reflection"):
+                proj = (item.get("project") or {}).get("id")
+                self.audit.append(event, {k: item.get(k) for k in ("task", "ok", "answer", "rounds", "name", "text") if k in item}, project=proj)
+            if event == "tool_result" and item.get("pending"):
+                pend = item["pending"]
+                self.notifications.push(
+                    "approval", f"⚠️ تایید لازم است: {pend.get('tool')}",
+                    body=json.dumps(pend.get("arguments", {}), ensure_ascii=False)[:200],
+                )
+                self.bus.emit("approval_requested", **pend)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # snapshot وضعیت
     # ------------------------------------------------------------------
 
     def snapshot(self) -> Dict[str, Any]:
+        pend = self.approvals.pending()
         return {
             "token": {
                 "set": self.token_info is not None,
@@ -325,6 +673,12 @@ class DevXState:
                 "list": self.projects_list(),
                 "next_default_name": self.projects.next_default_name(),
             },
+            "sessions": self.sessions_list(),
+            "notifications": {"unread": self.notifications.unread_count()},
+            "approvals": {"pending": len(pend), "items": pend[:10]},
+            "audit": {"verify": self.audit.verify()},
+            "usage": {"totals": self.usage.summary(days=14)["totals"]},
+            "automation": {"jobs": len(self.scheduler.list()), "watches": len(self.watcher.list())},
             "memory": {"counts": self.memory.counts(), "stats": self.memory.stats()},
             "skills": self.skills.stats(),
             "tools": len(self.engine._registry) if self.engine._registry else 0,
@@ -332,7 +686,6 @@ class DevXState:
         }
 
     def github_overview(self) -> Dict[str, Any]:
-        """خلاصهٔ فقط‌خواندنی گیت‌هاب برای پنل داشبورد."""
         if self.gh_tools is None:
             return {"ok": False, "error": "توکن گیت‌هاب تنظیم نشده"}
         user = self.gh_tools.get_authenticated_user()
@@ -362,6 +715,15 @@ class DevXHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_bytes(self, data: bytes, filename: str, content_type: str = "application/zip") -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
     def _read_json_body(self) -> Dict[str, Any]:
         try:
             length = int(self.headers.get("Content-Length") or 0)
@@ -377,7 +739,9 @@ class DevXHandler(BaseHTTPRequestHandler):
     # ---------------- routes ----------------
 
     def do_GET(self) -> None:  # noqa: N802
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
+        qs = parse_qs(parsed.query)
         if path in ("/", "/ui", "/index.html"):
             self._serve_ui()
         elif path == "/api/state":
@@ -387,16 +751,32 @@ class DevXHandler(BaseHTTPRequestHandler):
         elif path == "/api/history":
             self._send_json({"events": STATE.bus.history(150)})
         elif path == "/api/memory":
-            qs = parse_qs(urlparse(self.path).query)
             section = (qs.get("section") or ["all"])[0]
+            tag = (qs.get("tag") or [None])[0]
             if section == "tasks":
                 self._send_json({"ok": True, "tasks": STATE.memory.recent_tasks(30)})
+            elif section == "archived":
+                self._send_json({"ok": True, "archived": STATE.memory.archived_items(80)})
             else:
-                sections = [section] if section != "all" else ["facts", "lessons", "notes"]
-                data = {s: STATE.memory.all_items(s) for s in sections}
+                sections = [section] if section != "all" else ["facts", "lessons", "notes", "reflections"]
+                data = {}
+                for s in sections:
+                    items = STATE.memory.all_items(s)
+                    if tag:
+                        items = [i for i in items if tag in (i.get("tags") or [])]
+                    data[s] = items
                 self._send_json({"ok": True, **data})
         elif path == "/api/skills":
             self._send_json({"ok": True, "skills": STATE.skills.list_skills()})
+        elif path == "/api/skills/versions":
+            self._send_json(STATE.skills.versions((qs.get("name") or [""])[0]))
+        elif path == "/api/skills/diff":
+            def _int(k):
+                try:
+                    return int(qs[k][0])
+                except Exception:
+                    return None
+            self._send_json(STATE.skills.diff((qs.get("name") or [""])[0], _int("v1"), _int("v2")))
         elif path == "/api/projects":
             self._send_json({
                 "ok": True,
@@ -404,6 +784,57 @@ class DevXHandler(BaseHTTPRequestHandler):
                 "active": STATE._active_pub(),
                 "next_default_name": STATE.projects.next_default_name(),
             })
+        elif path == "/api/sessions":
+            self._send_json({"ok": True, **STATE.sessions_list()})
+        elif path == "/api/notifications":
+            unread = (qs.get("unread") or ["0"])[0] == "1"
+            self._send_json({"ok": True, "unread": STATE.notifications.unread_count(),
+                             "items": STATE.notifications.list(unread_only=unread, limit=60)})
+        elif path == "/api/approvals":
+            self._send_json({"ok": True, "pending": STATE.approvals.pending(),
+                             "history": STATE.approvals.history(30)})
+        elif path == "/api/audit":
+            if (qs.get("verify") or ["0"])[0] == "1":
+                self._send_json(STATE.audit.verify())
+            else:
+                self._send_json({"ok": True, "entries": STATE.audit.list(
+                    limit=int((qs.get("limit") or ["60"])[0]),
+                    project=int(qs["project"][0]) if "project" in qs else None,
+                    event=(qs.get("event") or [None])[0],
+                )})
+        elif path == "/api/usage":
+            self._send_json({"ok": True, **STATE.usage.summary(days=int((qs.get("days") or ["14"])[0]))})
+        elif path == "/api/schedule":
+            self._send_json({"ok": True, "jobs": STATE.scheduler.list(
+                project_id=int(qs["project"][0]) if "project" in qs else None)})
+        elif path == "/api/watch":
+            self._send_json({"ok": True, "watches": STATE.watcher.list(
+                project_id=int(qs["project"][0]) if "project" in qs else None)})
+        elif path == "/api/search":
+            kind = (qs.get("kind") or [None])[0]
+            pid = int(qs["project"][0]) if "project" in qs else None
+            self._send_json(STATE.global_search((qs.get("q") or [""])[0], kind=kind, project_id=pid))
+        elif path == "/api/timeline":
+            pid = int(qs["project"][0]) if "project" in qs else None
+            self._send_json(STATE.build_timeline(pid, limit=int((qs.get("limit") or ["80"])[0])))
+        elif path == "/api/snapshots":
+            pid = int(qs["project"][0]) if "project" in qs else None
+            rec = STATE.projects.get(pid) if pid else STATE.projects.active()
+            if not rec or "error" in rec:
+                self._send_json({"ok": False, "error": "پروژه یافت نشد"})
+            else:
+                self._send_json({"ok": True, "snapshots": STATE.timemachine.list(rec["key"])})
+        elif path == "/api/checkpoints":
+            self._send_json({"ok": True, "checkpoints": STATE.checkpoints.list(20)})
+        elif path == "/api/exports":
+            self._send_json({"ok": True, "exports": bundles.list_exports(config.EXPORTS_DIR)})
+        elif path == "/api/exports/download":
+            name = unquote((qs.get("file") or [""])[0])
+            p = (config.EXPORTS_DIR / name).resolve()
+            if config.EXPORTS_DIR.resolve() not in p.parents or not p.exists():
+                self._send_json({"ok": False, "error": "فایل یافت نشد"}, status=404)
+            else:
+                self._send_bytes(p.read_bytes(), p.name)
         elif path == "/api/github/overview":
             try:
                 self._send_json(STATE.github_overview())
@@ -418,24 +849,73 @@ class DevXHandler(BaseHTTPRequestHandler):
         if path == "/api/token":
             self._send_json(STATE.set_token(str(body.get("token", ""))))
         elif path == "/api/task":
-            self._send_json(STATE.start_task(str(body.get("task", ""))))
+            self._send_json(STATE.start_task(
+                str(body.get("task", "")),
+                session_id=int(body["session_id"]) if body.get("session_id") else None,
+            ))
         elif path == "/api/projects":
             self._send_json(STATE.create_project(str(body.get("name", ""))))
         elif path == "/api/projects/select":
-            try:
-                self._send_json(STATE.select_project(int(body.get("id", 0))))
-            except (TypeError, ValueError):
-                self._send_json({"ok": False, "error": "آیدی نامعتبر است"})
+            self._send_json(_safe_int_call(body, "id", STATE.select_project))
         elif path == "/api/projects/delete":
-            try:
-                self._send_json(STATE.delete_project(int(body.get("id", 0))))
-            except (TypeError, ValueError):
-                self._send_json({"ok": False, "error": "آیدی نامعتبر است"})
+            self._send_json(_safe_int_call(body, "id", STATE.delete_project))
         elif path == "/api/projects/rename":
-            try:
-                self._send_json(STATE.rename_project(int(body.get("id", 0)), str(body.get("name", ""))))
-            except (TypeError, ValueError):
-                self._send_json({"ok": False, "error": "آیدی نامعتبر است"})
+            self._send_json(_safe_int_call(body, "id", lambda i: STATE.rename_project(i, str(body.get("name", "")))))
+        elif path == "/api/persona":
+            self._send_json(_safe_int_call(body, "id", lambda i: STATE.set_persona(i, str(body.get("persona", "")))))
+        elif path == "/api/project/settings":
+            self._send_json(_safe_int_call(body, "id", lambda i: STATE.set_project_settings(i, {
+                "allow_dangerous": bool(body.get("allow_dangerous", False)),
+                "tool_groups": body.get("tool_groups") or [],
+            })))
+        elif path == "/api/sessions":
+            self._send_json(STATE.create_session(str(body.get("title", ""))))
+        elif path == "/api/sessions/select":
+            self._send_json(_safe_int_call(body, "id", STATE.select_session))
+        elif path == "/api/sessions/rename":
+            self._send_json(_safe_int_call(body, "id", lambda i: STATE.rename_session(i, str(body.get("title", "")))))
+        elif path == "/api/sessions/delete":
+            self._send_json(_safe_int_call(body, "id", STATE.delete_session))
+        elif path == "/api/notifications/read":
+            if body.get("id"):
+                self._send_json({"ok": STATE.notifications.mark_read(int(body["id"]))})
+            else:
+                self._send_json({"ok": True, "marked": STATE.notifications.mark_all_read()})
+        elif path == "/api/approvals/resolve":
+            self._send_json(STATE.resolve_approval(str(body.get("id", "")), bool(body.get("approved", False))))
+        elif path == "/api/schedule":
+            self._send_json(STATE.scheduler.add(
+                project_id=int(body.get("project_id") or (STATE.projects.active() or {}).get("id") or 0),
+                name=str(body.get("name", "job")), task=str(body.get("task", "")),
+                spec={"kind": body.get("kind", "interval"), "every_s": body.get("every_s"), "at": body.get("at")},
+            ))
+        elif path == "/api/schedule/delete":
+            self._send_json({"ok": STATE.scheduler.remove(int(body.get("id", 0)))})
+        elif path == "/api/schedule/toggle":
+            self._send_json(STATE.scheduler.set_enabled(int(body.get("id", 0)), bool(body.get("enabled", True))))
+        elif path == "/api/watch":
+            self._send_json(STATE.watcher.add(
+                project_id=int(body.get("project_id") or (STATE.projects.active() or {}).get("id") or 0),
+                repo=str(body.get("repo", "")),
+                events=[str(e) for e in (body.get("events") or ["issues", "prs", "commits"])],
+                interval_s=int(body.get("interval_s", config.WATCH_INTERVAL_DEFAULT)),
+                auto_task=str(body.get("auto_task", "")),
+            ))
+        elif path == "/api/watch/delete":
+            self._send_json({"ok": STATE.watcher.remove(int(body.get("id", 0)))})
+        elif path == "/api/snapshots/create":
+            pid = int(body["project_id"]) if body.get("project_id") else None
+            self._send_json(STATE.snapshot_create(pid, str(body.get("label", "snapshot"))))
+        elif path == "/api/snapshots/restore":
+            pid = int(body["project_id"]) if body.get("project_id") else None
+            self._send_json(STATE.snapshot_restore(pid, str(body.get("id", ""))))
+        elif path == "/api/export":
+            pid = int(body["project_id"]) if body.get("project_id") else None
+            self._send_json(STATE.project_export(pid))
+        elif path == "/api/import":
+            self._send_json(STATE.project_import(str(body.get("name", ""))))
+        elif path == "/api/resume":
+            self._send_json(STATE.resume_task(str(body.get("checkpoint_id", ""))))
         elif path == "/api/deepseek/login":
             STATE.connect_deepseek(visible_login=True)
             self._send_json({"ok": True, "message": "پنجرهٔ مرئی برای ورود دستی باز می‌شود"})
@@ -461,7 +941,7 @@ class DevXHandler(BaseHTTPRequestHandler):
 
     def _serve_sse(self) -> None:
         """استریم زندهٔ رویدادها به رابط؛ تاریخچهٔ اخیر + heartbeat هر ۱۵ ثانیه."""
-        q: "queue.Queue[Dict[str, Any]]" = queue.Queue(maxsize=500)
+        q: "queue.Queue[Dict[str, Any]]" = queue.Queue(maxsize=800)
 
         def push(event: str, item: Dict[str, Any]) -> None:
             try:
@@ -486,7 +966,6 @@ class DevXHandler(BaseHTTPRequestHandler):
                 return False
 
         try:
-            # بازپخش تاریخچهٔ اخیر برای reconnect
             for item in STATE.bus.history(40):
                 if not write_event(item):
                     return
@@ -513,12 +992,19 @@ class DevXHandler(BaseHTTPRequestHandler):
                 pass
 
 
+def _safe_int_call(body: Dict[str, Any], key: str, fn) -> Dict[str, Any]:
+    try:
+        return fn(int(body.get(key, 0)))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": f"{key} نامعتبر است"}
+
+
 def serve(open_browser: bool = True) -> ThreadingHTTPServer:
     """ساخت/اجرای سرور DevX؛ آدرس را برمی‌گرداند."""
     server = ThreadingHTTPServer((config.DEVX_HOST, config.DEVX_PORT), DevXHandler)
     server.daemon_threads = True
     url = f"http://{config.DEVX_HOST}:{config.DEVX_PORT}"
-    print(f"🚀 DevX روی {url} اجرا شد")
+    print(f"🚀 DevX v4 روی {url} اجرا شد")
     if open_browser:
         try:
             webbrowser.open(url)

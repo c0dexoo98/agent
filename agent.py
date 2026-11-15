@@ -35,17 +35,30 @@ from github import GithubException
 
 import config
 from agent_loop import AgentEngine, DeepSeekBrain, EventBus
+from approval import ApprovalManager
+from audit import AuditLog
 from builtin_tools import register_builtin_tools
+from checkpoint import CheckpointStore
 from deepseek_client import DeepSeekClient, DeepSeekError
+from fs_tools import register_fs_tools
 from github_tools import GitHubTools, TokenInvalidError, register_github_tools
 from memory import MemoryStore, register_memory_tools
+from notifications import NotificationCenter
 from projects import ProjectManager
+from ratelimit import RateLimiter, harden_github_tools
+from sandbox import register_code_tools
+from scheduler import Scheduler
+from sessions import SessionManager
 from skills import SkillLibrary, register_skill_tools
+from timemachine import TimeMachine
 from tool_registry import ToolRegistry
+from usage import UsageTracker
+from web_tools import register_web_tools
+from webhooks import WebhookWatcher
 
 BANNER = r"""
 ╔══════════════════════════════════════════════════════════════════╗
-║   DevX Agent (CLI) — حافظه‌دار، مهارت‌آموز، ابزارمحور               ║
+║   DevX Agent (CLI) v4 — حافظه + مهارت + زیرایجنت + اتوماسیون       ║
 ║   chat.deepseek.com (Playwright) + GitHub (PyGithub 2.x)          ║
 ║   رابط وب حرفه‌ای:  python devx.py  →  http://127.0.0.1:8770       ║
 ╚══════════════════════════════════════════════════════════════════╝
@@ -104,19 +117,34 @@ def obtain_github_tools(max_attempts: Optional[int] = None) -> GitHubTools:
 # ======================================================================
 
 def build_registry(gh_tools: Optional[GitHubTools], memory: MemoryStore, skills: SkillLibrary,
-                   projects: Optional[ProjectManager] = None) -> ToolRegistry:
-    """ساخت رجیستری: گیت‌هاب (اگر توکن هست) + حافظه + مهارت + پروژه + ابزارهای داخلی.
+                   projects: Optional[ProjectManager] = None, workspace: Optional[Any] = None,
+                   approvals: Optional[ApprovalManager] = None, audit: Optional[AuditLog] = None,
+                   active_project_id: Optional[int] = None) -> ToolRegistry:
+    """ساخت رجیستری v4: گیت‌هاب + حافظه + مهارت + پروژه + وب + فایل/کد سندباکسی + داخلی.
 
     حافظه/مهارت ایزولهٔ پروژهٔ فعال‌اند؛ با سوییچ پروژه، رجیستری با نمونه‌های
-    جدید بازساخته می‌شود تا ابزارها هم به حافظهٔ همان پروژه اشاره کنند.
+    جدید بازساخته می‌شود. دروازهٔ تایید انسانی + ممیزی هم در صورت ارسال فعال می‌شود.
     """
     registry = ToolRegistry()
     if gh_tools is not None:
         register_github_tools(registry, gh_tools)
     register_memory_tools(registry, memory)
     register_skill_tools(registry, skills)
+    register_web_tools(registry)
+    if workspace is not None:
+        register_fs_tools(registry, workspace)
+        register_code_tools(registry, workspace)
     if projects is not None:
         projects.register_project_tools(registry)
+    if approvals is not None:
+        registry.approvals = approvals
+        registry.audit = audit
+        registry.project_provider = lambda: active_project_id
+        allow = False
+        if projects is not None and active_project_id is not None:
+            rec = projects.get(active_project_id)
+            allow = bool((rec.get("settings") or {}).get("allow_dangerous"))
+        registry.approval_policy = lambda name: not allow
     register_builtin_tools(registry)
     return registry
 
@@ -191,7 +219,26 @@ def run_cli() -> None:
     rec = cli_pick_project(projects)
     memory = MemoryStore(memory_dir=projects.memory_dir(rec["key"]))
     skills = SkillLibrary(skills_dir=projects.skills_dir(rec["key"]))
-    print(f"🎯 پروژهٔ فعال: [{rec['id']}] {rec['name']} — حافظهٔ ایزولهٔ خودش بارگذاری شد")
+    sessions = SessionManager(rec["key"], projects.memory_dir(rec["key"]))
+    print(f"🎯 پروژهٔ فعال: [{rec['id']}] {rec['name']} — حافظهٔ ایزولهٔ خودش بارگذاری شد (سشن: {sessions.active()['title']})")
+
+    # ── زیرساخت v4 ──
+    audit = AuditLog(config.AUDIT_DIR / "chain.jsonl")
+    usage = UsageTracker(config.BASE_DIR / "usage.json")
+    notifications = NotificationCenter(config.BASE_DIR / "notifications.json")
+    approvals = ApprovalManager(config.BASE_DIR / "approvals.json", ttl_s=config.APPROVAL_TTL)
+    timemachine = TimeMachine(config.SNAPSHOTS_DIR)
+    checkpoints = CheckpointStore(config.CHECKPOINTS_DIR)
+    rate_limiter = RateLimiter(config.RATELIMIT_GH_PER_MIN)
+    if gh_tools is not None:
+        hardened = harden_github_tools(gh_tools, rate_limiter, max_attempts=config.RETRY_MAX_ATTEMPTS)
+        print(f"🛡 ابزارهای گیت‌هاب محافظت شدند (نرخ {config.RATELIMIT_GH_PER_MIN}/min + بازتلاش ×{config.RETRY_MAX_ATTEMPTS}) — {hardened} متد")
+    scheduler = Scheduler(config.BASE_DIR / "jobs.json", fire_callback=lambda job: _run(engine, job["task"], projects))
+    if config.SCHEDULER_ENABLED:
+        scheduler.start()
+    watcher = WebhookWatcher(config.BASE_DIR / "watches.json", gh_provider=lambda: gh_tools)
+    if config.WATCHER_ENABLED:
+        watcher.start()
 
     bus = EventBus()
     bus.subscribe(cli_event_printer)
@@ -220,14 +267,43 @@ def run_cli() -> None:
         skills=skills,
         event_bus=bus,
         max_rounds=config.MAX_ROUNDS,
+        usage=usage,
+        checkpoints=checkpoints,
     )
-    engine.set_registry(build_registry(gh_tools, memory, skills, projects))
-    engine.set_project({"id": rec["id"], "name": rec["name"], "key": rec["key"]})
+    workspace = config.WORKSPACE_DIR / str(rec["key"])
+    engine.set_registry(build_registry(
+        gh_tools, memory, skills, projects, workspace=workspace,
+        approvals=approvals, audit=audit, active_project_id=rec["id"],
+    ))
+    engine.register_delegate_tool()
+    engine.set_project({"id": rec["id"], "name": rec["name"], "key": rec["key"], "persona": rec.get("persona", "")})
+
+    def _cli_apply(rec2: Dict[str, Any]) -> None:
+        """سوییچ کامل CLI به پروژهٔ دیگر (حافظه/مهارت/رجیستری/سشن)."""
+        nonlocal memory, skills, sessions, rec
+        rec = rec2
+        memory = MemoryStore(memory_dir=projects.memory_dir(rec2["key"]))
+        skills = SkillLibrary(skills_dir=projects.skills_dir(rec2["key"]))
+        sessions = SessionManager(rec2["key"], projects.memory_dir(rec2["key"]))
+        engine.memory = memory
+        engine.skills = skills
+        workspace2 = config.WORKSPACE_DIR / str(rec2["key"])
+        engine.set_registry(build_registry(
+            gh_tools, memory, skills, projects, workspace=workspace2,
+            approvals=approvals, audit=audit, active_project_id=rec2["id"],
+        ))
+        engine.register_delegate_tool()
+        engine.set_project({"id": rec2["id"], "name": rec2["name"], "key": rec2["key"], "persona": rec2.get("persona", "")})
+        engine.session_id = sessions.active_id()
+
+    engine.session_id = sessions.active_id()
 
     counts = memory.counts()
     print(f"🧠 حافظه: {counts['facts']} حقیقت، {counts['lessons']} درس، {counts['tasks']} تسک | 🧰 مهارت‌ها: {len(skills.list_skills())}")
     print_tools(engine.registry)
-    print("✅ آماده است. تسک بده (یا /tools /projects /project /newproject /rmproject /memory /skills /stats /newchat /exit)\n")
+    print("✅ آماده است. تسک بده یا از دستورات استفاده کن:\n"
+          "   /tools /projects /project N /newproject نام /rmproject N /sessions /newsession\n"
+          "   /approve /schedule /watch /snapshot /export /import /persona /search عبارت /audit /usage /risk /exit\n")
 
     args = [a for a in sys.argv[1:]]
     one_shot = " ".join(a for a in args if not a.startswith("--")).strip()
@@ -260,7 +336,7 @@ def run_cli() -> None:
                 if arg.isdigit() and "error" not in projects.get(int(arg)):
                     projects.select(int(arg))
                     rec2 = projects.get(int(arg))
-                    cli_apply_project(engine, projects, gh_tools, rec2)
+                    _cli_apply(rec2)
                     print(f"🎯 سوییچ شد به [{rec2['id']}] {rec2['name']} — حافظهٔ ایزولهٔ همان پروژه\n")
                 else:
                     print("❌ آیدی نامعتبر — /projects را ببین\n")
@@ -270,7 +346,7 @@ def run_cli() -> None:
                 if not name:
                     name = input("🆕 نام پروژهٔ جدید: ").strip()
                 rec2 = projects.create(name or projects.next_default_name())
-                cli_apply_project(engine, projects, gh_tools, rec2)
+                _cli_apply(rec2)
                 print(f"✅ پروژهٔ «{rec2['name']}» با آیدی {rec2['id']} ساخته و فعال شد (آیدی خودکار ثبت شد)\n")
                 continue
             if task.startswith("/rmproject"):
@@ -290,8 +366,113 @@ def run_cli() -> None:
                 print(f"🗑 حذف شد؛ آیدی‌ها بازچینش شدند: " + ", ".join(f"{p['id']}={p['name']}" for p in projects.list()) + "\n")
                 new_active = projects.active()
                 if new_active:
-                    cli_apply_project(engine, projects, gh_tools, new_active)
+                    _cli_apply(new_active)
                     print(f"🎯 پروژهٔ فعال: [{new_active['id']}] {new_active['name']}\n")
+                continue
+            if task == "/sessions":
+                for s in sessions.list():
+                    mark = " ← فعال" if s["id"] == sessions.active_id() else ""
+                    print(f"  [{s['id']}] {s['title']} — {s.get('task_count', 0)} تسک{mark}")
+                continue
+            if task == "/newsession":
+                s = sessions.create(input("💬 عنوان سشن جدید (خالی=خودکار): ").strip())
+                engine.session_id = s["id"]
+                print(f"✅ سشن «{s['title']}» ساخته و فعال شد — حافظهٔ پروژه مشترک، گفت‌وگو ایزوله\n")
+                continue
+            if task.startswith("/approve"):
+                pend = approvals.pending()
+                if not pend:
+                    print("چیزی در صف تایید نیست.\n")
+                    continue
+                for p in pend:
+                    print(f"  [{p['id']}] {p['tool']} ← {json.dumps(p['arguments'], ensure_ascii=False)[:120]}")
+                aid = input("شناسهٔ درخواست + y/n (مثل ap-1 y): ").strip().split()
+                if len(aid) == 2 and aid[1] in ("y", "n"):
+                    res = approvals.resolve(aid[0], aid[1] == "y")
+                    print(("✅ تایید شد — موتور ادامه می‌دهد" if aid[1] == "y" else "⛔ رد شد") + "\n" if res.get("ok") else "❌ ناموفق\n")
+                continue
+            if task == "/schedule":
+                t = input("⏰ تسک خودکار: ").strip()
+                if not t:
+                    print("تسک خالی است\n")
+                    continue
+                kind = input("kind (interval/daily): ").strip() or "interval"
+                if kind == "daily":
+                    spec = {"kind": "daily", "at": input("ساعت HH:MM (UTC): ").strip()}
+                else:
+                    spec = {"kind": "interval", "every_s": int(input("هر چند ثانیه [3600]: ").strip() or 3600)}
+                res = scheduler.add(rec["id"], t[:30], t, spec)
+                print(("✅ ثبت شد — " + json.dumps(res["job"], ensure_ascii=False)[:140] + "\n") if res.get("ok") else f"❌ {res.get('error')}\n")
+                continue
+            if task == "/watch":
+                repo = input("👀 owner/repo: ").strip()
+                auto = input("تسک خودکار (خالی=فقط اعلان، {{change}} جایگزین می‌شود): ").strip()
+                res = watcher.add(rec["id"], repo, ["issues", "prs", "commits"], config.WATCH_INTERVAL_DEFAULT, auto)
+                print(("✅ زیر نظر رفت\n" if res.get("ok") else f"❌ {res.get('error')}\n"))
+                continue
+            if task == "/snapshot":
+                label = input("💾 برچسب snapshot: ").strip() or "cli"
+                res = timemachine.create(rec["key"], projects.memory_dir(rec["key"]), projects.skills_dir(rec["key"]), label=label)
+                print(("✅ گرفته شد: " + res["id"] + "\n") if res.get("ok") else "❌ ناموفق\n")
+                continue
+            if task == "/export":
+                from bundles import export_project
+                res = export_project(rec, projects.memory_dir(rec["key"]), projects.skills_dir(rec["key"]))
+                print(("📦 بسته: " + res["file"] + f" ({res['files']} فایل)\n") if res.get("ok") else "❌ ناموفق\n")
+                continue
+            if task == "/import":
+                from bundles import import_project, list_exports
+                for x in list_exports()[:10]:
+                    print(f"  - {x['name']} ({x.get('project_name')})")
+                name = input("نام بسته: ").strip()
+                res = import_project(config.EXPORTS_DIR / name, projects, projects.memory_root, projects.skills_root)
+                if res.get("ok"):
+                    _cli_apply(projects.active())
+                    print(f"↗ وارد شد به‌عنوان [{res['project']['id']}] {res['project']['name']}\n")
+                else:
+                    print(f"❌ {res.get('error')}\n")
+                continue
+            if task == "/persona":
+                print(f"persona فعلی: {(rec.get('persona') or '(خالی)')[:200]}")
+                new_p = input("🎭 persona جدید (خالی=پاک کردن): ").strip()
+                projects.set_persona(rec["id"], new_p)
+                rec = projects.get(rec["id"])
+                engine.set_project({"id": rec["id"], "name": rec["name"], "key": rec["key"], "persona": rec.get("persona", "")})
+                print("✅ ذخیره شد\n")
+                continue
+            if task.startswith("/search"):
+                q = task[len("/search"):].strip() or input("🔎 عبارت: ").strip()
+                from globalsearch import search_all
+                res = search_all(projects.list(), projects.memory_root, projects.skills_root, q)
+                for r in res.get("results", [])[:10]:
+                    print(f"  [{r['kind']}] #{r['project_id']} {r['project_name']} — {r['text'][:80]} (score {r['score']})")
+                if not res.get("results"):
+                    print("چیزی پیدا نشد.")
+                print()
+                continue
+            if task == "/audit":
+                v = audit.verify()
+                print(f"🛡 زنجیرهٔ ممیزی: {'✅ سالم' if v['ok'] else '⛔ دستکاری‌شده در خط ' + str(v.get('broken_at'))} — {v['entries']} رویداد")
+                for e in audit.list(10):
+                    print(f"  [{e['seq']}] {e['event']} {(json.dumps(e.get('data') or {}, ensure_ascii=False)[:80])}")
+                print()
+                continue
+            if task == "/usage":
+                s = usage.summary(14)
+                t = s["totals"]
+                print(f"📊 کل: {t['tasks']} تسک، {t['rounds']} دور، {t['tool_calls']} ابزار، ~{t['est_tokens_in'] + t['est_tokens_out']} توکن، {round(t['duration_s'])}s")
+                for d in s["trend"][-7:]:
+                    print(f"  {d['date']}: {d['tasks']}T · {d['rounds']}R · ~{d['est_tokens']}tok")
+                print()
+                continue
+            if task == "/risk":
+                cur = bool((rec.get("settings") or {}).get("allow_dangerous"))
+                conf = input(("⚠️ ابزارهای خطرناک بدون تایید اجرا شوند؟ (y/N): ") if not cur else "بازگشت به حالت تایید؟ (y/N): ").strip().lower()
+                if conf == "y":
+                    projects.set_settings(rec["id"], {"allow_dangerous": not cur})
+                    rec = projects.get(rec["id"])
+                    _cli_apply(rec)
+                    print(("⚠️ risky mode روشن شد" if not cur else "✅ تایید انسانی فعال شد") + "\n")
                 continue
             if task == "/memory":
                 print("🧠", memory.counts(), "| آمار:", memory.stats())

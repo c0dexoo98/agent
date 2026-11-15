@@ -54,10 +54,16 @@ class Tool:
 
 
 class ToolRegistry:
-    """نگهداری و اجرای ابزارها؛ هستهٔ پلاگین‌پذیری ایجنت."""
+    """نگهداری و اجرای ابزارها؛ هستهٔ پلاگین‌پذیری ایجنت — با دروازهٔ تایید انسانی."""
 
     def __init__(self) -> None:
         self._tools: Dict[str, Tool] = {}
+        # دروازهٔ Approval (سرور ست می‌کند): اگر ابزار dangerous بود، قبل از اجرا
+        # درخواست تایید ساخته و تا تصمیم کاربر صبر می‌شود.
+        self.approvals: Any = None                       # approval.ApprovalManager
+        self.approval_policy: Any = None                 # callable(tool_name)->bool (نیاز به تایید؟)
+        self.audit: Any = None                           # audit.AuditLog
+        self.project_provider: Any = None                # callable()->Optional[int]  (پروژهٔ فعال)
 
     # ------------------------------------------------------------------
     # ثبت ابزار
@@ -138,17 +144,50 @@ class ToolRegistry:
     def __len__(self) -> int:
         return len(self._tools)
 
+    def _needs_approval(self, tool: Tool) -> bool:
+        """آیا این ابزار باید از دروازهٔ تایید انسانی عبور کند؟"""
+        if not tool.dangerous or self.approvals is None:
+            return False
+        if self.approval_policy is not None:
+            try:
+                return bool(self.approval_policy(tool.name))
+            except Exception:
+                return True
+        return True
+
     def execute(self, name: str, arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """اجرای امن یک ابزار و برگرداندن نتیجه به‌شکل {"ok":..., "data"/"error":...}.
 
-        هر خطایی (ورودی اشتباه، خطای API، ...) گرفته می‌شود تا یک خطای ابزار
-        کل حلقهٔ ایجنت را نابود نکند؛ مدل متن خطا را می‌بیند و می‌تواند اصلاح کند.
+        ابزارهای خطرناک با دروازهٔ Approval: درخواست تایید ساخته می‌شود، رویداد
+        approval_requested منتشر و تا تصمیم کاربر/TTL صبر می‌شود؛ رد → پیام
+        «رد شد» به مدل. هر عبور/رد در لاگ ممیزی زنجیره‌ای ثبت می‌شود.
+        هر خطایی گرفته می‌شود تا یک خطای ابزار کل حلقهٔ ایجنت را نابود نکند.
         """
         arguments = dict(arguments or {})
         try:
             tool = self.get(name)
         except KeyError as e:
             return {"ok": False, "error": str(e), "available_tools": self.names()}
+
+        # ── دروازهٔ تایید انسانی ──
+        if self._needs_approval(tool):
+            proj = None
+            if self.project_provider is not None:
+                try:
+                    proj = self.project_provider()
+                except Exception:
+                    proj = None
+            req = self.approvals.request(name, arguments, project=proj)
+            if self.audit is not None:
+                self.audit.append("approval_requested", {"approval_id": req["id"], "tool": name, "arguments": arguments}, project=proj)
+            return {
+                "ok": False,
+                "pending_approval": {"id": req["id"], "tool": name, "arguments": arguments, "ttl": self.approvals.ttl_s},
+                "error": (
+                    f"ابزار '{name}' خطرناک است و به تایید انسانی نیاز دارد — "
+                    f"درخواست {req['id']} ساخته شد؛ نتیجه پس از تصمیم کاربر به شما می‌رسد."
+                ),
+            }
 
         try:
             result = tool.func(**arguments)
@@ -168,9 +207,22 @@ class ToolRegistry:
                 if isinstance(data, dict):
                     api_msg = str(data.get("message", ""))
                 msg = f"GitHub API {status}: {api_msg or msg}"
+            if self.audit is not None:
+                self._audit_tool(name, arguments, {"ok": False, "error": msg[:200]})
             return {"ok": False, "error": msg}
 
-        return {"ok": True, "data": self._jsonify(result)}
+        data = self._jsonify(result)
+        if self.audit is not None:
+            self._audit_tool(name, arguments, {"ok": bool(data.get("ok"))})
+        return {"ok": True, "data": data}
+
+    def _audit_tool(self, name: str, arguments: Dict[str, Any], outcome: Dict[str, Any]) -> None:
+        """ثبت اجرای ابزار در ممیزی — خطا نباید اجرای ابزار را بکشد."""
+        try:
+            proj = self.project_provider() if self.project_provider else None
+            self.audit.append("tool_executed", {"tool": name, "outcome": outcome, "args_keys": sorted(arguments.keys())}, project=proj)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # آماده‌سازی برای مدل

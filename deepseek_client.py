@@ -71,6 +71,7 @@ class DeepSeekClient:
         self._pw: Optional[Playwright] = None
         self._ctx: Optional[BrowserContext] = None
         self._page: Optional[Page] = None
+        self._on_delta = None  # callback استریم جزئی پاسخ (UI زنده)
 
     # ------------------------------------------------------------------
     # چرخهٔ عمر مرورگر
@@ -213,17 +214,23 @@ class DeepSeekClient:
         self._goto(self.url)
         self._wait_chat_input_ready(timeout=90)
 
+    def set_on_delta(self, callback) -> None:
+        """ثبت callback استریم جزئی: هر بار متن پاسخ تغییر کند صدا زده می‌شود."""
+        self._on_delta = callback
+
     def wait_for_response(self, timeout: Optional[int] = None) -> str:
         """انتظار برای کامل شدن پاسخ آخرین پیام دستیار و برگرداندن متن آن.
 
         منطق تشخیص «کامل شدن»: آخرین بلاک `.ds-markdown--block` باید غیرخالی
         باشد، چند پول متوالی بدون تغییر بماند و textarea#chat-input دوباره
-        فعال شود (حین تولید، ورودی غیرفعال است).
+        فعال شود (حین تولید، ورودی غیرفعال است). حین تولید، تغییر متن با
+        `on_delta` به بیرون استریم می‌شود تا UI زنده تایپ کند.
         """
         assert self._page is not None
         timeout = timeout or self.response_timeout
         deadline = time.time() + timeout
         last_text = ""
+        last_delta = ""
         stable = 0
         while time.time() < deadline:
             text = ""
@@ -240,6 +247,13 @@ class DeepSeekClient:
                 input_ready = bool(el and el.is_enabled())
             except Exception:
                 pass
+
+            if text and text != last_delta and self._on_delta is not None:
+                last_delta = text
+                try:
+                    self._on_delta(text)
+                except Exception:
+                    pass
 
             if text and text == last_text and input_ready:
                 stable += 1
