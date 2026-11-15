@@ -366,9 +366,55 @@ main{display:grid;grid-template-columns:1fr 340px;gap:16px;padding:16px 22px;max
 }
 .modal .secure .led{width:7px;height:7px;border-radius:50%;background:var(--ok);color:var(--ok);animation:softPulse 2.4s infinite}
 
+/* ── پروژه‌ها ─────────────────────────────────────────────────────── */
+.chip.project{
+  cursor:pointer;border-color:rgba(255,210,63,.45);color:var(--yellow);
+  background:var(--yellow-dim);
+}
+.chip.project .led{background:var(--yellow);color:var(--yellow);animation:softPulse 2.2s infinite}
+.chip.project b{color:var(--text)}
+.newchat-btn{
+  display:flex;align-items:center;gap:7px;cursor:pointer;flex:0 0 auto;
+  border:1px solid var(--line-strong);border-radius:10px;padding:7px 14px;
+  background:linear-gradient(145deg,var(--red-deep),var(--red-dark));color:#fff;
+  font-family:var(--fa);font-size:12.5px;font-weight:600;transition:all .2s;
+  box-shadow:0 0 14px rgba(255,43,74,.3);
+}
+.newchat-btn:hover{box-shadow:0 0 24px rgba(255,43,74,.6);transform:translateY(-1px)}
+.proj-item{
+  display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:8px;
+  border-radius:10px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.02);
+  cursor:pointer;transition:all .15s;
+}
+.proj-item:hover{border-color:rgba(62,230,207,.4);background:var(--teal-dim)}
+.proj-item.active{border-color:rgba(255,210,63,.55);background:var(--yellow-dim)}
+.proj-item .pid{
+  font-family:var(--mono);font-size:11px;color:var(--yellow);flex:0 0 auto;
+  border:1px solid rgba(255,210,63,.4);border-radius:6px;padding:2px 8px;direction:ltr;
+}
+.proj-item.active .pid{animation:blink 1.6s steps(1) infinite}
+.proj-item .pname{flex:1;font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.proj-item .pstats{font-family:var(--mono);font-size:10px;color:var(--faint);direction:ltr;flex:0 0 auto}
+.proj-item .del{
+  flex:0 0 auto;border:1px solid rgba(255,43,74,.4);color:var(--red);background:rgba(255,43,74,.07);
+  border-radius:7px;padding:3px 9px;font-size:11px;cursor:pointer;font-family:var(--fa);transition:all .15s;
+}
+.proj-item .del:hover{background:rgba(255,43,74,.2);box-shadow:0 0 10px rgba(255,43,74,.4)}
+.proj-list{max-height:250px;overflow-y:auto;margin-top:8px;padding-inline-end:4px}
+.proj-badge{
+  font-family:var(--mono);font-size:10px;direction:ltr;color:var(--yellow);
+  border:1px solid rgba(255,210,63,.4);background:var(--yellow-dim);
+  border-radius:5px;padding:2px 8px;margin-inline-start:auto;
+}
+.renum-hint{
+  font-size:11px;color:var(--teal);margin-top:8px;line-height:1.8;
+  border-top:1px dashed rgba(62,230,207,.25);padding-top:8px;
+}
+
 .mtop{margin-top:12px;font-size:12px;color:var(--muted);line-height:1.8}
 .mtop b{color:var(--teal)}
 </style>
+</head>
 <body>
 
 <!-- ═══════════ هدر ═══════════ -->
@@ -381,6 +427,10 @@ main{display:grid;grid-template-columns:1fr 340px;gap:16px;padding:16px 22px;max
     </div>
   </div>
   <div class="chips">
+    <div class="chip project" id="chipProject" title="پروژهٔ فعال — کلیک: مدیریت پروژه‌ها" onclick="openNewChat()">
+      <i class="led"></i>PROJ <b id="projState">—</b>
+    </div>
+    <button class="newchat-btn" onclick="openNewChat()">＋ چت جدید</button>
     <div class="chip" id="chipDeepseek"><i class="led"></i>DEEPSEEK <b id="dsState">—</b></div>
     <div class="chip" id="chipGithub"><i class="led"></i>GITHUB <b id="ghState">—</b></div>
     <div class="chip" id="chipMemory"><i class="led"></i>MEMORY <b id="memState">0</b></div>
@@ -482,6 +532,26 @@ main{display:grid;grid-template-columns:1fr 340px;gap:16px;padding:16px 22px;max
       <button class="btn ghost" onclick="closeTokenModal()">فعلاً نه</button>
     </div>
     <div class="secure"><span class="led"></span> توکن فقط در حافظهٔ همین اجرا می‌ماند — در فایل، لاگ یا کد ذخیره نمی‌شود.</div>
+  </div>
+</div>
+
+<!-- ═══════════ مودال چت جدید / مدیریت پروژه‌ها ═══════════ -->
+<div class="overlay" id="projOverlay">
+  <div class="modal" id="projModal">
+    <h2>📁 چت جدید — نام پروژه</h2>
+    <div class="sub">
+      برای هر چت یک پروژه با <b style="color:var(--yellow)">آیدی خودکار</b> ثبت می‌شود و
+      <b style="color:var(--teal)">حافظه و مهارت‌ها به‌طور کامل ایزوله</b> نگه داشته می‌شوند تا اطلاعات پروژه‌ها قاطی نشود.
+    </div>
+    <input type="text" id="projNameInput" placeholder="نام پروژه… (مثلاً: تست)" autocomplete="off" maxlength="60">
+    <div class="err" id="projErr"></div>
+    <div class="row">
+      <button class="btn" id="projSubmit" onclick="createProject()">✚ ساخت پروژه و شروع</button>
+      <button class="btn ghost" onclick="closeProjModal()">بستن</button>
+    </div>
+    <div class="sub" style="margin-top:16px;margin-bottom:4px">یا ادامهٔ یکی از پروژه‌های موجود:</div>
+    <div class="proj-list" id="projList"></div>
+    <div class="renum-hint" id="renumHint">💡 با حذف هر پروژه، آیدی پروژه‌های بعدی خودکار بازچینش می‌شود تا آیدی‌ها همیشه فشرده (۱، ۲، ۳، …) بمانند.</div>
   </div>
 </div>
 
@@ -669,9 +739,109 @@ async function loadState(){
     // توکن
     if(s.token.set){$('tokenOverlay').classList.remove('show');}
     else{$('tokenOverlay').classList.add('show');}
+    // پروژه‌ها — بدون پروژهٔ فعال: مودال «چت جدید + نام» خودکار باز می‌شود
+    renderProject(s.project);
+    if(!s.project.active && !running && !projAskedOnce){
+      projAskedOnce=true;openNewChat(true);
+    }
     $('kvMem').textContent='memory/';$('kvSkill').textContent='skills_learned/';
   }catch(e){console.warn('state load failed',e)}
 }
+
+/* ── پروژه‌ها ─────────────────────────────────────────────────── */
+let projAskedOnce=false, projOpen=false;
+function renderProject(p){
+  if(!p){return}
+  const a=p.active;
+  $('projState').textContent=a?`#${a.id} ${a.name}`:'—';
+  $('chipProject').className='chip project'+(a?'':' blink');
+  // پنل سیستم: محل حافظهٔ ایزولهٔ پروژهٔ فعال
+  $('kvMem').textContent=a?`memory/projects/#${a.id}/`:'memory/';
+  $('kvSkill').textContent=a?`skills/projects/#${a.id}/`:'skills_learned/';
+  if(projOpen)fillProjList(p.list,p.active,p.next_default_name);
+}
+async function openNewChat(auto=false){
+  projOpen=true;
+  $('projOverlay').classList.add('show');
+  $('projNameInput').placeholder=`نام پروژه… (مثلاً: تست)`;
+  try{
+    const r=await fetch('/api/projects');const j=await r.json();
+    if(j.ok)fillProjList(j.projects,j.active,j.next_default_name);
+  }catch(e){console.warn('projects load failed',e)}
+}
+function closeProjModal(){projOpen=false;$('projOverlay').classList.remove('show')}
+function fillProjList(items,active,nextDefault){
+  $('projNameInput').placeholder=`نام پروژه… (پیش‌فرض: ${nextDefault||'پروژه N'})`;
+  const list=$('projList');
+  if(!items||!items.length){
+    list.innerHTML='<div class="mem-item">هنوز پروژه‌ای نیست — نام پروژهٔ اول را بنویس.</div>';return;
+  }
+  list.innerHTML=items.map(p=>`
+    <div class="proj-item ${active&&active.id===p.id?'active':''}" onclick="selectProject(${p.id})">
+      <span class="pid">#${p.id}</span>
+      <span class="pname" title="دبل‌کلیک: تغییر نام" ondblclick="event.stopPropagation();renameProject(${p.id},'${esc(p.name).replace(/'/g,"\\'")}')">${esc(p.name)}</span>
+      <span class="pstats">${p.task_count||0} tasks</span>
+      <button class="del" onclick="event.stopPropagation();deleteProject(${p.id},'${esc(p.name).replace(/'/g,"\\'")}')">🗑</button>
+    </div>`).join('');
+}
+async function createProject(){
+  const name=$('projNameInput').value.trim(),err=$('projErr'),btn=$('projSubmit');
+  err.textContent='';
+  btn.disabled=true;btn.innerHTML='<span class="spin"></span> در حال ثبت آیدی…';
+  try{
+    const r=await fetch('/api/projects',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
+    const j=await r.json();
+    if(j.ok){
+      const p=j.project;
+      toast('ok',`📁 پروژهٔ «<b>${esc(p.name)}</b>» ساخته شد — <b>آیدی ${p.id}</b> خودکار ثبت شد · حافظهٔ ایزوله`);
+      $('projNameInput').value='';closeProjModal();
+      startNewChatView();
+      refreshAll();
+    }else{
+      err.textContent=j.error||'ساخت پروژه ناموفق بود.';
+      const modal=$('projModal');modal.classList.remove('shake');void modal.offsetWidth;modal.classList.add('shake');
+    }
+  }catch(e){err.textContent='خطای ارتباط با سرور.'}
+  finally{btn.disabled=false;btn.textContent='✚ ساخت پروژه و شروع'}
+}
+async function selectProject(id){
+  const r=await fetch('/api/projects/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+  const j=await r.json();
+  if(j.ok){
+    toast('ok',`🎯 سوییچ به پروژهٔ <b>#${j.project.id} ${esc(j.project.name)}</b> — حافظهٔ ایزولهٔ همان پروژه بارگذاری شد`);
+    closeProjModal();startNewChatView();refreshAll();
+  }else toast('err','⛔ '+esc(j.error||'سوییچ ناموفق'));
+}
+async function deleteProject(id,name){
+  if(!confirm(`پروژهٔ «${name}» با کل حافظه و مهارت‌هایش حذف شود؟\nآیدی پروژه‌های بعدی خودکار بازچینش می‌شود.`))return;
+  const r=await fetch('/api/projects/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+  const j=await r.json();
+  if(j.ok){
+    toast('ok',`🗑 پروژهٔ «${esc(j.deleted.name)}» حذف شد — آیدی‌ها بازچینش شدند (فشرده: ۱،۲،۳،…)`);
+    startNewChatView();refreshAll();
+  }else toast('err','⛔ '+esc(j.error||'حذف ناموفق'));
+}
+async function renameProject(id,old){
+  const name=prompt('نام جدید پروژه:',old);
+  if(!name||name===old)return;
+  const r=await fetch('/api/projects/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,name})});
+  const j=await r.json();
+  if(j.ok){toast('ok',`✏️ نام به «${esc(name)}» تغییر کرد`);refreshAll();}
+  else toast('err','⛔ '+esc(j.error||'تغییر نام ناموفق'));
+}
+function startNewChatView(){
+  // چت جدید: استریم خالی می‌شود (حافظهٔ ایزولهٔ پروژهٔ تازه/سوییچ‌شده)
+  stream.innerHTML='';
+  $('rounds').innerHTML='';
+  const empty=$('empty');
+  const d=document.createElement('div');d.id='empty';
+  d.innerHTML=`
+    <div class="radar"><div class="beam"></div><div class="core"></div></div>
+    <h2>چت جدید آماده است</h2>
+    <p>حافظهٔ <b>ایزولهٔ این پروژه</b> بارگذاری شد ▊</p>`;
+  stream.appendChild(d);
+}
+$('projNameInput')?.addEventListener('keydown',e=>{if(e.key==='Enter')createProject()});
 
 /* ── توکن ─────────────────────────────────────────────────────── */
 async function submitToken(){
@@ -717,7 +887,9 @@ async function sendTask(){
     if(!j.ok){toast('err','⛔ '+esc(j.error||'شروع تسک ناموفق بود'));return}
     $('taskInput').value='';autoGrow();updateSend();
     $('empty')?.remove();
-    const c=card('user','تو · '+now(),'TASK');
+    const pj=j.project;
+    const who=`تو · ${now()} <span class="proj-badge">PROJ #${pj?pj.id:'—'} ${pj?esc(pj.name):''}</span>`;
+    const c=card('user',who,'TASK');
     c.innerHTML+=`<div class="txt">${esc(task)}</div>`;
     stream.appendChild(c);c.scrollIntoView({behavior:'smooth',block:'end'});
   }catch(e){toast('err','خطای شبکه: '+esc(e))}
@@ -740,7 +912,8 @@ es.onmessage=ev=>{
     case 'task_start':
       running=true;updateSend();renderRounds(0,m.max_rounds);
       $('empty')?.remove();
-      if(m.task)toast('info','🚀 تسک شروع شد'); break;
+      if(m.project&&m.project.id!=null)toast('info',`🚀 تسک در پروژهٔ <b>#${m.project.id} ${esc(m.project.name||'')}</b> شروع شد`);
+      else toast('info','🚀 تسک شروع شد'); break;
     case 'round': renderRounds(m.round,m.max_rounds); break;
     case 'tool_call':
       currentToolCard=addToolCard(m.tool,m.arguments,m.round);
@@ -763,6 +936,13 @@ es.onmessage=ev=>{
       toast(m.ok?'ok':'err',m.ok?'✅ تسک تمام شد':'⚠️ تسک با مشکل تمام شد');
       break;
     case 'memory_updated': refreshAll(); break;
+    case 'project_created':
+      toast('ok',`📁 پروژهٔ «<b>${esc(m.project.name)}</b>» ثبت شد — آیدی <b>${m.project.id}</b> (خودکار)`);break;
+    case 'project_switched':
+      toast('ok',`🎯 پروژهٔ فعال: <b>#${m.project.id} ${esc(m.project.name)}</b> — حافظهٔ ایزوله`);break;
+    case 'project_deleted':
+      toast('info',`🗑 پروژهٔ «${esc(m.deleted.name)}» حذف شد — آیدی‌ها بازچینش شدند`);break;
+    case 'projects_updated': refreshAll(); break;
   }
 };
 es.onerror=()=>{ /* EventSource خودش reconnect می‌کند */ };

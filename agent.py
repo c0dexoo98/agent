@@ -39,6 +39,7 @@ from builtin_tools import register_builtin_tools
 from deepseek_client import DeepSeekClient, DeepSeekError
 from github_tools import GitHubTools, TokenInvalidError, register_github_tools
 from memory import MemoryStore, register_memory_tools
+from projects import ProjectManager
 from skills import SkillLibrary, register_skill_tools
 from tool_registry import ToolRegistry
 
@@ -102,15 +103,66 @@ def obtain_github_tools(max_attempts: Optional[int] = None) -> GitHubTools:
 # ساخت رجیستری و موتور
 # ======================================================================
 
-def build_registry(gh_tools: Optional[GitHubTools], memory: MemoryStore, skills: SkillLibrary) -> ToolRegistry:
-    """ساخت رجیستری: گیت‌هاب (اگر توکن هست) + حافظه + مهارت + ابزارهای داخلی."""
+def build_registry(gh_tools: Optional[GitHubTools], memory: MemoryStore, skills: SkillLibrary,
+                   projects: Optional[ProjectManager] = None) -> ToolRegistry:
+    """ساخت رجیستری: گیت‌هاب (اگر توکن هست) + حافظه + مهارت + پروژه + ابزارهای داخلی.
+
+    حافظه/مهارت ایزولهٔ پروژهٔ فعال‌اند؛ با سوییچ پروژه، رجیستری با نمونه‌های
+    جدید بازساخته می‌شود تا ابزارها هم به حافظهٔ همان پروژه اشاره کنند.
+    """
     registry = ToolRegistry()
     if gh_tools is not None:
         register_github_tools(registry, gh_tools)
     register_memory_tools(registry, memory)
     register_skill_tools(registry, skills)
+    if projects is not None:
+        projects.register_project_tools(registry)
     register_builtin_tools(registry)
     return registry
+
+
+def cli_pick_project(projects: ProjectManager) -> Dict[str, Any]:
+    """انتخاب/ساخت پروژه هنگام شروع CLI — نام پرسیده می‌شود، آیدی خودکار ثبت می‌شود."""
+    items = projects.list()
+    if not items:
+        default = projects.next_default_name()
+        try:
+            name = input(f"🆕 نام پروژهٔ جدید (پیش‌فرض: {default}): ").strip()
+        except (KeyboardInterrupt, EOFError):
+            name = ""
+        rec = projects.create(name or default)
+        print(f"✅ پروژهٔ «{rec['name']}» با آیدی {rec['id']} ساخته شد (آیدی خودکار ثبت شد).")
+        return rec
+
+    print("\n📁 پروژه‌ها:")
+    for p in items:
+        mark = " ← فعال" if projects.active_key == p["key"] else ""
+        print(f"  [{p['id']}] {p['name']} — {p.get('task_count', 0)} تسک{mark}")
+    active = projects.active()
+    default_id = active["id"] if active else items[-1]["id"]
+    try:
+        raw = input(f"شمارهٔ پروژه را بزن یا نامِ پروژهٔ جدید بنویس [پیش‌فرض: {default_id}]: ").strip()
+    except (KeyboardInterrupt, EOFError):
+        raw = ""
+    if not raw:
+        rec = projects.get(default_id) if "error" not in projects.get(default_id) else items[-1]
+        projects.select(rec["id"])
+        return rec
+    if raw.isdigit() and "error" not in projects.get(int(raw)):
+        projects.select(int(raw))
+        return projects.get(int(raw))
+    rec = projects.create(raw)
+    print(f"✅ پروژهٔ «{rec['name']}» با آیدی {rec['id']} ساخته شد.")
+    return rec
+
+
+def cli_apply_project(engine: AgentEngine, projects: ProjectManager,
+                      gh_tools: Optional[GitHubTools], rec: Dict[str, Any]) -> None:
+    """سوییچ کامل موتور به پروژهٔ انتخاب‌شده: حافظه + مهارت + رجیستری + شناسنامه."""
+    engine.memory = MemoryStore(memory_dir=projects.memory_dir(rec["key"]))
+    engine.skills = SkillLibrary(skills_dir=projects.skills_dir(rec["key"]))
+    engine.set_registry(build_registry(gh_tools, engine.memory, engine.skills, projects))
+    engine.set_project({"id": rec["id"], "name": rec["name"], "key": rec["key"]})
 
 
 def cli_event_printer(event: str, item: Dict[str, Any]) -> None:
@@ -133,8 +185,13 @@ def run_cli() -> None:
     print(BANNER)
 
     gh_tools = obtain_github_tools()
-    memory = MemoryStore()
-    skills = SkillLibrary()
+
+    # ── پروژه‌ها: انتخاب/ساخت هنگام شروع (نام پرسیده می‌شود، آیدی خودکار ثبت می‌شود) ──
+    projects = ProjectManager()
+    rec = cli_pick_project(projects)
+    memory = MemoryStore(memory_dir=projects.memory_dir(rec["key"]))
+    skills = SkillLibrary(skills_dir=projects.skills_dir(rec["key"]))
+    print(f"🎯 پروژهٔ فعال: [{rec['id']}] {rec['name']} — حافظهٔ ایزولهٔ خودش بارگذاری شد")
 
     bus = EventBus()
     bus.subscribe(cli_event_printer)
@@ -164,19 +221,20 @@ def run_cli() -> None:
         event_bus=bus,
         max_rounds=config.MAX_ROUNDS,
     )
-    engine.set_registry(build_registry(gh_tools, memory, skills))
+    engine.set_registry(build_registry(gh_tools, memory, skills, projects))
+    engine.set_project({"id": rec["id"], "name": rec["name"], "key": rec["key"]})
 
     counts = memory.counts()
     print(f"🧠 حافظه: {counts['facts']} حقیقت، {counts['lessons']} درس، {counts['tasks']} تسک | 🧰 مهارت‌ها: {len(skills.list_skills())}")
     print_tools(engine.registry)
-    print("✅ آماده است. تسک بده (یا /tools /memory /skills /stats /newchat /exit)\n")
+    print("✅ آماده است. تسک بده (یا /tools /projects /project /newproject /rmproject /memory /skills /stats /newchat /exit)\n")
 
     args = [a for a in sys.argv[1:]]
     one_shot = " ".join(a for a in args if not a.startswith("--")).strip()
 
     try:
         if one_shot:
-            _run(engine, one_shot)
+            _run(engine, one_shot, projects)
             return
         while True:
             try:
@@ -192,6 +250,49 @@ def run_cli() -> None:
             if task == "/tools":
                 print_tools(engine.registry)
                 continue
+            if task == "/projects":
+                for p in projects.list():
+                    mark = " ← فعال" if p["key"] == projects.active_key else ""
+                    print(f"  [{p['id']}] {p['name']} — {p.get('task_count', 0)} تسک{mark}")
+                continue
+            if task.startswith("/project "):
+                arg = task.split(maxsplit=1)[1].strip()
+                if arg.isdigit() and "error" not in projects.get(int(arg)):
+                    projects.select(int(arg))
+                    rec2 = projects.get(int(arg))
+                    cli_apply_project(engine, projects, gh_tools, rec2)
+                    print(f"🎯 سوییچ شد به [{rec2['id']}] {rec2['name']} — حافظهٔ ایزولهٔ همان پروژه\n")
+                else:
+                    print("❌ آیدی نامعتبر — /projects را ببین\n")
+                continue
+            if task.startswith("/newproject"):
+                name = task[len("/newproject"):].strip()
+                if not name:
+                    name = input("🆕 نام پروژهٔ جدید: ").strip()
+                rec2 = projects.create(name or projects.next_default_name())
+                cli_apply_project(engine, projects, gh_tools, rec2)
+                print(f"✅ پروژهٔ «{rec2['name']}» با آیدی {rec2['id']} ساخته و فعال شد (آیدی خودکار ثبت شد)\n")
+                continue
+            if task.startswith("/rmproject"):
+                arg = task[len("/rmproject"):].strip()
+                if not arg.isdigit():
+                    print("❌ شکل درست: /rmproject 2\n")
+                    continue
+                victim = projects.get(int(arg))
+                if "error" in victim:
+                    print("❌ آیدی نامعتبر\n")
+                    continue
+                conf = input(f"⚠️ پروژهٔ [{victim['id']}] {victim['name']} با کل حافظه‌اش حذف شود؟ (y/N): ").strip().lower()
+                if conf != "y":
+                    print("لغو شد.\n")
+                    continue
+                res = projects.delete(victim["id"])
+                print(f"🗑 حذف شد؛ آیدی‌ها بازچینش شدند: " + ", ".join(f"{p['id']}={p['name']}" for p in projects.list()) + "\n")
+                new_active = projects.active()
+                if new_active:
+                    cli_apply_project(engine, projects, gh_tools, new_active)
+                    print(f"🎯 پروژهٔ فعال: [{new_active['id']}] {new_active['name']}\n")
+                continue
             if task == "/memory":
                 print("🧠", memory.counts(), "| آمار:", memory.stats())
                 continue
@@ -206,18 +307,21 @@ def run_cli() -> None:
                 brain_client.new_chat()
                 print("✅ گفت‌وگوی تازه آغاز شد.\n")
                 continue
-            _run(engine, task)
+            _run(engine, task, projects)
     finally:
         brain_client.close()
 
 
-def _run(engine: AgentEngine, task: str) -> None:
-    print("🤖 در حال کار...\n")
+def _run(engine: AgentEngine, task: str, projects: Optional[ProjectManager] = None) -> None:
+    proj = getattr(engine, "project_info", {}) or {}
+    print(f"🤖 در حال کار (پروژه [{proj.get('id', '—')}] {proj.get('name', '—')})...\n")
     try:
         report = engine.run_task(task)
     except Exception as e:  # noqa: BLE001 — خطای حلقه نباید برنامه را ببندد
         print(f"⛔ خطا در حلقهٔ ایجنت: {e}\n")
         return
+    if projects and proj.get("key"):
+        projects.record_task(proj["key"])
     print("\n" + "─" * 64)
     print(f"🤖 پاسخ نهایی ({report['rounds']} دور، {report['duration_s']}s):")
     print(report["answer"])

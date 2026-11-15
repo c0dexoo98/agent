@@ -62,6 +62,33 @@ def main() -> None:
         assert json.loads(raw)["ok"] is False
         print("ok: /api/token rejects malformed token")
 
+        # ۳.۵) پروژه‌ها: ساخت با آیدی خودکار، ایزولاسیون حافظه، حذف + بازچینش آیدی
+        status, raw = req("/api/projects", "POST", {"name": "تست"})
+        p1 = json.loads(raw)["project"]
+        assert p1["id"] >= 1 and p1["name"] == "تست"
+        status, raw = req("/api/projects", "POST", {"name": "دوم"})
+        p2 = json.loads(raw)["project"]
+        assert p2["id"] == p1["id"] + 1
+        # حافظهٔ ایزوله: حقیقت فقط در پروژهٔ فعال (p2) ذخیره می‌شود
+        srv.STATE.memory.add_fact("حقیقت مخصوص پروژهٔ دوم")
+        status, raw = req("/api/projects/select", "POST", {"id": p1["id"]})
+        assert json.loads(raw)["ok"]
+        status, raw = req("/api/memory?section=all")
+        facts = json.loads(raw)["facts"]
+        assert all("پروژهٔ دوم" not in f["text"] for f in facts), "نشتی حافظه بین پروژه‌ها!"
+        # برگشت به p2 → حقیقتش سر جایش است
+        status, raw = req("/api/projects/select", "POST", {"id": p2["id"]})
+        status, raw = req("/api/memory?section=all")
+        assert any("پروژهٔ دوم" in f["text"] for f in json.loads(raw)["facts"])
+        # حذف p2 → p1 بازچینش می‌شود (آیدی فشرده)
+        status, raw = req("/api/projects/delete", "POST", {"id": p2["id"]})
+        assert json.loads(raw)["ok"] and json.loads(raw)["renumbered"]
+        status, raw = req("/api/projects")
+        pj = json.loads(raw)
+        assert [p["id"] for p in pj["projects"]] == [1], "آیدی‌ها باید فشرده باشند"
+        assert pj["active"]["id"] == 1
+        print("ok: projects API (auto-id, isolation, delete+renumber)", flush=True)
+
         # ۴) تسک بدون مغزِ پاسخ‌ده → FakeBrain خالی → خطای مهربان task_end
         status, raw = req("/api/task", "POST", {"task": "تست دود سرور"})
         assert json.loads(raw)["ok"] is True
@@ -96,7 +123,7 @@ def main() -> None:
         # ۶) SSE: اتصال زنده و دریافت snapshot (خط‌به‌خط بخوان — استریم بسته نمی‌شود)
         sse = urllib.request.urlopen(f"http://127.0.0.1:{port}/api/stream", timeout=15)
         first = b""
-        for _ in range(40):
+        for _ in range(400):  # تاریخچه ممکن است طولانی باشد (هر رویداد = ۲ خط)
             line = sse.readline()
             if not line:
                 break

@@ -159,6 +159,13 @@ class AgentEngine:
         self._system_prompt_cache: Optional[str] = None
         self._lock = threading.RLock()
         self.busy = False  # یک تسک در حال اجراست
+        # شناسنامهٔ پروژهٔ فعال (سرور/CLI هنگام سوییچ پروژه ست می‌کنند)
+        self.project_info: Dict[str, Any] = {}
+
+    def set_project(self, info: Dict[str, Any]) -> None:
+        """تعیین پروژهٔ فعال برای برچسب‌خوردن رویدادها/گزارش‌ها."""
+        with self._lock:
+            self.project_info = dict(info or {})
 
     # ------------------------------------------------------------------
     # رجیستری (قابل تعویض پس از دریافت توکن گیت‌هاب)
@@ -192,7 +199,13 @@ class AgentEngine:
         used = bool(memory_ctx or skills_ctx)
         if used:
             self.bus.emit("context", memory=bool(memory_ctx), skills=bool(skills_ctx))
-        return f"{self._system_prompt()}{memory_ctx}{skills_ctx}\n\n=== USER TASK ===\n{task}"
+        proj = dict(self.project_info)
+        project_ctx = (
+            f"\n\n=== PROJECT ===\nid: {proj.get('id')} | name: {proj.get('name')} | "
+            "(memory & learned skills are isolated to this project)"
+            if proj else ""
+        )
+        return f"{self._system_prompt()}{project_ctx}{memory_ctx}{skills_ctx}\n\n=== USER TASK ===\n{task}"
 
     # ------------------------------------------------------------------
     # اجرای تسک
@@ -205,7 +218,13 @@ class AgentEngine:
                 raise RuntimeError("یک تسک در حال اجراست — صبر کن تمام شود")
             self.busy = True
         started = time.time()
-        self.bus.emit("task_start", task=task, max_rounds=self.max_rounds)
+        proj = dict(self.project_info)
+        self.bus.emit(
+            "task_start",
+            task=task,
+            max_rounds=self.max_rounds,
+            project=proj,
+        )
         tools_used: List[str] = []
         errors = 0
         trace: List[Dict[str, Any]] = []
@@ -285,6 +304,7 @@ class AgentEngine:
                 "skill_learned": skill_name,
                 "lesson_learned": lesson,
                 "duration_s": round(duration, 1),
+                "project": proj,
             }
             self.bus.emit("task_end", **report)
             return report
