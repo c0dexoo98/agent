@@ -267,6 +267,8 @@ class SkillLibrary:
                 src = alt
             else:
                 return {"ok": False, "error": f"فایل یافت نشد: {path}"}
+        if src.suffix.lower() != ".md":
+            return {"ok": False, "error": "فقط فایل‌های Markdown (با پسوند .md) قابل ورود هستند"}
         s = self._parse(src)
         if not s:
             return {"ok": False, "error": "فایل مهارت معتبر نیست (سرآیند --- لازم است)"}

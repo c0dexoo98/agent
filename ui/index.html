@@ -1079,6 +1079,9 @@ const es=new EventSource('/api/stream');
 es.onmessage=ev=>{
   let m;try{m=JSON.parse(ev.data)}catch(_){return}
   const e=m.event;
+  // رویدادهای replay (تاریخچهٔ ارسالی هنگام اتصال/اتصال‌مجدد SSE): فقط رویدادهای
+  // نوسازی وضعیت پردازش می‌شوند تا کارت/توست تکراری ساخته نشود
+  if(m.replay&&!['snapshot','deepseek_state','token_state','projects_updated','sessions_updated','notifications_updated','approvals_updated'].includes(e))return;
   switch(e){
     case 'snapshot': refreshAll(); break;
     case 'deepseek_state': loadState(); break;

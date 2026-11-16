@@ -75,7 +75,8 @@ class TimeMachine:
             return {"ok": False, "error": "snapshot یافت نشد"}
         restored = 0
         with zipfile.ZipFile(src) as z:
-            names = [n for n in z.namelist() if n != "_meta.json"]
+            # ورودی‌های دایرکتوری («memory/sub/») جدا هستند — فایل حساب نمی‌شوند
+            names = [n for n in z.namelist() if n != "_meta.json" and not n.endswith("/")]
             # ضد Zip-Slip: فقط نام‌های امن (در مقصد زیرمجموعه بمانند) — بقیه رد می‌شوند
             def _dest_of(n: str) -> Optional[Path]:
                 if n.startswith("memory/"):

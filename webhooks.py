@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -32,6 +33,7 @@ class WebhookWatcher:
         self._lock = threading.RLock()
         self._watches: List[Dict[str, Any]] = []
         self._next_id = 1
+        self._next_poll: Dict[int, float] = {}  # سرِ موعدِ per-watch (monotonic) — باگ قبلی: همه هر سیکل پول می‌شدند
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._load()
@@ -75,6 +77,7 @@ class WebhookWatcher:
         with self._lock:
             before = len(self._watches)
             self._watches = [w for w in self._watches if w["id"] != int(watch_id)]
+            self._next_poll.pop(int(watch_id), None)
             self.save()
             return len(self._watches) < before
 
@@ -140,9 +143,14 @@ class WebhookWatcher:
         while not self._stop.is_set():
             with self._lock:
                 watches = [dict(w) for w in self._watches]
+            now = time.monotonic()
             for w in watches:
                 if self._stop.is_set():
                     break
+                # سرِ موعد per-watch: هر watch فقط با interval_s خودش پول می‌شود
+                if now < self._next_poll.get(w["id"], 0.0):
+                    continue
+                self._next_poll[w["id"]] = now + max(60, int(w.get("interval_s", 300)))
                 try:
                     change = self.poll_once(w)
                 except Exception:
@@ -152,7 +160,10 @@ class WebhookWatcher:
                         self.on_change(w, change)
                     except Exception:
                         pass
-            self._stop.wait(min((w["interval_s"] for w in watches), default=300))
+            # بیدار شدن حداکثر تا نزدیک‌ترین سرِ موعد (با سقف ۳۰۰ ثانیه)
+            pending = [t - time.monotonic() for t in self._next_poll.values()]
+            wait_s = min(pending) if pending else 300.0
+            self._stop.wait(max(5.0, min(wait_s, 300.0)))
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():

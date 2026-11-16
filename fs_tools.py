@@ -127,8 +127,12 @@ def _fs_search(root: Path, pattern: str, ignored: set) -> Dict[str, Any]:
     for p in root.rglob("*"):
         if any(part in ignored for part in p.parts):
             continue
-        if p.is_file() and fnmatch.fnmatch(p.name, pattern):
-            hits.append(str(p.relative_to(root)))
+        if not p.is_file():
+            continue
+        # تطبیق هم با نام فایل و هم با مسیر نسبی (posix) — «src/*.py» هم کار کند
+        rel = p.relative_to(root).as_posix()
+        if fnmatch.fnmatch(p.name, pattern) or fnmatch.fnmatch(rel, pattern):
+            hits.append(rel)
             if len(hits) >= 200:
                 break
     return {"ok": True, "count": len(hits), "files": hits}

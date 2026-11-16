@@ -1007,8 +1007,9 @@ class DevXHandler(BaseHTTPRequestHandler):
                 return False
 
         try:
+            # تاریخچهٔ اخیر با برچسب replay — UI رویدادهای کارتی/توستی را تکرار نکند
             for item in STATE.bus.history(40):
-                if not write_event(item):
+                if not write_event({**item, "replay": True}):
                     return
             write_event({"event": "snapshot", **STATE.snapshot()})
             last_beat = time.time()

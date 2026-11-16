@@ -85,8 +85,8 @@ def import_project(zip_path: Path, project_mgr: Any, memory_root: Path, skills_r
             sdir = skills_root / "projects" / rec["key"]
             restored = 0
             for n in z.namelist():
-                if n == "_meta.json":
-                    continue
+                if n == "_meta.json" or n.endswith("/"):
+                    continue  # متادیتا و ورودی دایرکتوری جدا هستند
                 if n.startswith("memory/"):
                     dest = _safe_join(mdir, n[len("memory/"):])
                 elif n.startswith("skills/"):

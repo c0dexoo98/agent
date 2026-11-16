@@ -85,6 +85,7 @@ class UsageTracker:
         """خلاصه برای داشبورد: روند روزانه + تفکیک پروژه + جمع کل."""
         with self._lock:
             all_days = dict(self._data["days"])
+            totals = dict(self._data["totals"])
         keys = sorted(all_days.keys())[-max(1, int(days)):]
         trend = []
         for k in keys:
@@ -102,4 +103,4 @@ class UsageTracker:
                 agg = by_project.setdefault(pid, self._empty())
                 for f in agg:
                     agg[f] += stats.get(f, 0)
-        return {"trend": trend, "by_project": by_project, "totals": dict(self._data["totals"])}
+        return {"trend": trend, "by_project": by_project, "totals": totals}

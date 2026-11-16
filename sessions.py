@@ -65,7 +65,7 @@ class SessionManager:
             for s in self._data["sessions"]:
                 if s["id"] == self._data["active_id"]:
                     return s
-        return self._data["sessions"][-1] if self._data["sessions"] else None
+            return self._data["sessions"][-1] if self._data["sessions"] else None
 
     def active_id(self) -> Optional[int]:
         s = self.active()
