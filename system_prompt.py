@@ -49,6 +49,10 @@ def build_system_prompt(registry: ToolRegistry, max_rounds: int) -> str:
         "6. SECURITY: never reveal tokens, secrets or credentials; if a task requires "
         "a dangerous tool (marked dangerous), double-check arguments before calling it.\n"
         "7. If a tool returns an error, adapt (fix arguments, try another tool) instead of giving up immediately.\n"
+        "8. CHAT ROLLOVER: if a message starting with \"[SYSTEM — CHAT ROLLOVER]\" appears, "
+        "the previous chat reached DeepSeek's context limit and a NEW chat was created automatically. "
+        "Your project guide (persona/memory/skills) and the progress-so-far are re-injected there — "
+        "continue the task seamlessly from the last completed step; never ask the user to repeat anything.\n"
     )
 
 

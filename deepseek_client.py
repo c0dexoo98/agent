@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 from playwright.sync_api import (
     BrowserContext,
@@ -38,6 +38,14 @@ class ResponseTimeout(DeepSeekError):
     """پاسخ مدل در مهلت مقرر کامل نشد."""
 
 
+class ContextLimitError(DeepSeekError):
+    """سایت دیپ‌سیک اعلام کرده context این گفت‌وگو به سقف رسیده.
+
+    موتور ایجنت این خطا را می‌گیرد و «چرخش خودکار چت» انجام می‌دهد:
+    چت جدید در سایت + انتقال راهنمای پروژه و خلاصهٔ پیشرفت + ادامهٔ تسک.
+    """
+
+
 class DeepSeekClient:
     """مدیریت مرورگر ماندگار و مکالمه با chat.deepseek.com."""
 
@@ -52,6 +60,18 @@ class DeepSeekClient:
     CHAT_INPUT_SELECTOR = "textarea#chat-input"
     # بلاک‌های Markdown پاسخ‌های دستیار
     MARKDOWN_SELECTOR = ".ds-markdown--block"
+    # نشانه‌های متنی «سقف context پر شد» در صفحه (چینیِ سایت + انگلیسی)
+    LIMIT_PATTERNS = (
+        "上下文长度已达上限",
+        "上下文过长",
+        "长度超过限制",
+        "已达上限",
+        "超出限制",
+        "maximum context length",
+        "context length limit",
+        "exceeds the maximum context",
+        "context window is full",
+    )
 
     def __init__(
         self,
@@ -72,6 +92,9 @@ class DeepSeekClient:
         self._ctx: Optional[BrowserContext] = None
         self._page: Optional[Page] = None
         self._on_delta = None  # callback استریم جزئی پاسخ (UI زنده)
+        # پایش مصرف context چت جاری (برای Auto Chat Rollover) — تخمین: توکن ≈ کاراکتر/۴
+        self.chat_chars_sent = 0
+        self.chat_chars_received = 0
 
     # ------------------------------------------------------------------
     # چرخهٔ عمر مرورگر
@@ -208,15 +231,38 @@ class DeepSeekClient:
         box.fill("")
         box.fill(single_line)
         box.press("Enter")
+        self.chat_chars_sent += len(text)
 
     def new_chat(self) -> None:
-        """شروع گفت‌وگوی تازه (رفتن به صفحهٔ اصلی = نشست جدید)."""
+        """شروع گفت‌وگوی تازه (رفتن به صفحهٔ اصلی = نشست جدید) + صفر کردن پایش مصرف."""
         self._goto(self.url)
         self._wait_chat_input_ready(timeout=90)
+        self.chat_chars_sent = 0
+        self.chat_chars_received = 0
+
+    def chat_usage(self) -> Dict[str, int]:
+        """مصرف تخمینی چت جاری — برای داشبورد و تصمیم چرخش."""
+        return {
+            "chars_sent": self.chat_chars_sent,
+            "chars_received": self.chat_chars_received,
+            "est_tokens": (self.chat_chars_sent + self.chat_chars_received) // 4,
+        }
 
     def set_on_delta(self, callback) -> None:
         """ثبت callback استریم جزئی: هر بار متن پاسخ تغییر کند صدا زده می‌شود."""
         self._on_delta = callback
+
+    def _page_mentions_limit(self) -> bool:
+        """اسکن سبک متن صفحه برای پیام‌های «سقف context پر شد» (best-effort)."""
+        assert self._page is not None
+        try:
+            body = self._page.query_selector("body")
+            if body is None:
+                return False
+            low = (body.inner_text() or "").lower()
+            return any(p in low for p in self.LIMIT_PATTERNS)
+        except Exception:
+            return False
 
     def wait_for_response(self, timeout: Optional[int] = None) -> str:
         """انتظار برای کامل شدن پاسخ آخرین پیام دستیار و برگرداندن متن آن.
@@ -225,6 +271,10 @@ class DeepSeekClient:
         باشد، چند پول متوالی بدون تغییر بماند و textarea#chat-input دوباره
         فعال شود (حین تولید، ورودی غیرفعال است). حین تولید، تغییر متن با
         `on_delta` به بیرون استریم می‌شود تا UI زنده تایپ کند.
+
+        اگر مدل بدون تولیدِ هیچ بلاکِ پاسخی متوقف شد و ورودی دوباره فعال بود
+        و متن صفحه نشانه‌های سقف context داشت → ContextLimitError (موتور
+        همان را می‌گیرد و چت را می‌چرخاند).
         """
         assert self._page is not None
         timeout = timeout or self.response_timeout
@@ -232,6 +282,7 @@ class DeepSeekClient:
         last_text = ""
         last_delta = ""
         stable = 0
+        empty_ready = 0
         while time.time() < deadline:
             text = ""
             try:
@@ -258,11 +309,21 @@ class DeepSeekClient:
             if text and text == last_text and input_ready:
                 stable += 1
                 if stable >= self.stable_checks:
+                    self.chat_chars_received += len(text)
                     return text
             else:
                 stable = 0
                 if text:
                     last_text = text
+            if not text and input_ready:
+                # مدل تمام شد ولی هیچ پاسخی تولید نشد — احتمال پیام خطای سقف context
+                empty_ready += 1
+                if empty_ready >= 2 and self._page_mentions_limit():
+                    raise ContextLimitError(
+                        "سایت دیپ‌سیک اعلام کرد context این گفت‌وگو پر است — چرخش خودکار چت لازم است."
+                    )
+            else:
+                empty_ready = 0
             time.sleep(self.poll_interval)
         raise ResponseTimeout(
             f"پاسخ دیپ‌سیک در {timeout} ثانیه کامل نشد (RESPONSE_TIMEOUT را در .env بیشتر کن)."

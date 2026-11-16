@@ -1112,6 +1112,8 @@ es.onmessage=ev=>{
       toast(m.ok?'ok':'err',`🧩 زیرایجنت ${esc(m.role||'')} ${m.ok?'تمام شد':'ناتمام'} (${m.rounds||0} دور)`);break;
     case 'checkpoint_saved':
       toast('info',`💾 چک‌پوینت ذخیره شد (دور ${m.round})`,2600);break;
+    case 'chat_rollover':
+      toast('info',`🔄 <b>چرخش چت</b> — سقف context؛ چت جدید ساخته شد و راهنمای پروژه منتقل شد (تخمین ${m.est_tokens_before||'—'} توکن، دلیل: ${m.reason==='site_error'?'پیام سایت':'نزدیکِ سقف'})`,7000);break;
     case 'approval_requested':
       renderApprovalCard(m);break;
     case 'approval_resolved':

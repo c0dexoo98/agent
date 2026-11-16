@@ -348,6 +348,70 @@ def test_engine_v4(tmp: Path) -> None:
     print("ok: engine v4 (subtask + reflection + persona + usage + checkpoint/resume)")
 
 
+def test_chat_rollover(tmp: Path) -> None:
+    """چرخش خودکار چت: سقف context → چت جدید + انتقال راهنمای پروژه + ادامه از همان نقطه."""
+    mgr, rec, mem, sk, reg = fresh(tmp)
+    bus = EventBus()
+    events = []
+    bus.subscribe(lambda e, i: events.append((e, i)))
+
+    # ذخیرهٔ تنظیمات و آستانهٔ کوچک برای تست
+    old = (config.DEEPSEEK_CONTEXT_TOKENS, config.ROLLOVER_AT_RATIO)
+    config.DEEPSEEK_CONTEXT_TOKENS = 400
+    config.ROLLOVER_AT_RATIO = 0.8  # آستانه = ۳۲۰ توکن ≈ ۱۲۸۰ کاراکتر
+    try:
+        # ── الف) چرخش تخمینی: نتیجهٔ بزرگِ ابزار → _send قبل از سقف می‌چرخد ──
+        big = "x" * 2000
+        brain = FakeBrain([
+            json.dumps({"tool": "echo", "arguments": {"text": big}}),
+            json.dumps({"final_answer": "پس از چرخش کامل شد"}),
+            json.dumps({"skip": True}),   # DISTILL
+            json.dumps({"skip": True}),   # REFLECT
+        ])
+        eng = AgentEngine(brain=brain, memory=mem, skills=sk, event_bus=bus, max_rounds=6)
+        eng.set_registry(reg)
+        eng.set_project({"id": rec["id"], "name": rec["name"], "key": rec["key"], "persona": "همیشه فارسی"})
+        r = eng.run_task("تسک چرخش تخمینی")
+        assert r["ok"] and r["rollovers"] == 1, r
+        assert brain.new_chat_calls == 2, f"باید چت جدید در سایت ساخته می‌شد: {brain.new_chat_calls}"
+        roll = [i for e, i in events if e == "chat_rollover"]
+        assert roll and roll[0]["reason"] == "estimate" and roll[0]["rollover_no"] == 1
+        handoff = brain.sent[1]
+        # راهنمای کامل پروژه در پیام انتقال: persona + حافظه + تسک + پیشرفت + پیام معلق
+        assert "[SYSTEM — CHAT ROLLOVER]" in handoff
+        assert "PROJECT GUIDE" in handoff and "همیشه فارسی" in handoff
+        assert "TASK IN PROGRESS" in handoff and "تسک چرخش تخمینی" in handoff
+        assert "PROGRESS SO FAR" in handoff and "echo" in handoff
+        assert "CONTINUE WITH THIS PENDING MESSAGE" in handoff and "TOOL_RESULT echo" in handoff
+        assert r["chat_est_tokens"] > 0
+
+        # ── ب) چرخش با خطای سایت (ContextLimitError از wait_response) ──
+        class ContextLimitError(Exception):
+            pass
+
+        brain2 = FakeBrain([
+            ContextLimitError("سایت اعلام کرد سقف context پر است"),
+            json.dumps({"final_answer": "بعد از خطای سایت ادامه داد"}),
+            json.dumps({"skip": True}),
+            json.dumps({"skip": True}),
+        ])
+        eng2 = AgentEngine(brain=brain2, memory=mem, skills=sk, event_bus=bus, max_rounds=6)
+        eng2.set_registry(reg)
+        eng2.set_project({"id": rec["id"], "name": rec["name"], "key": rec["key"]})
+        r2 = eng2.run_task("تسک خطای سایت")
+        assert r2["ok"] and r2["rollovers"] == 1 and brain2.new_chat_calls == 2
+        assert [i["reason"] for e, i in events if e == "chat_rollover"].count("site_error") == 1
+        # آخرین پیام ارسالیِ قبل از خطا (پیام اول) در handoff ادغام شده تا تکرار نشود
+        assert "تسک خطای سایت" in brain2.sent[1]
+
+        # ── ج) گزارش تسک حاوی لاگ چرخش ──
+        assert r["rollover_log"] and r["rollover_log"][0]["reason"] == "estimate"
+        assert any(e == "chat_rollover" for e, _ in events)
+        print("ok: chat rollover (estimate + site-error + handoff guide + new chat on site)")
+    finally:
+        config.DEEPSEEK_CONTEXT_TOKENS, config.ROLLOVER_AT_RATIO = old
+
+
 if __name__ == "__main__":
     tmp = Path(tempfile.mkdtemp(prefix="devx_v4_"))
     try:
@@ -360,6 +424,7 @@ if __name__ == "__main__":
         test_timemachine_and_bundles(tmp / "g")
         test_scheduler_sessions(tmp / "h")
         test_engine_v4(tmp / "i")
+        test_chat_rollover(tmp / "j")
         print("\nALL V4 FEATURE TESTS PASSED ✅")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

@@ -83,14 +83,19 @@ class DeepSeekBrain:
 
 
 class FakeBrain:
-    """مغز اسکریپت‌شده برای تست آفلاین موتور — پاسخ‌ها را به‌ترتیب می‌خواند."""
+    """مغز اسکریپت‌شده برای تست آفلاین موتور — پاسخ‌ها را به‌ترتیب می‌خواند.
 
-    def __init__(self, responses: List[str]) -> None:
+    اگر عضو لیست یک Exception باشد، همان هنگام wait_response پرتاب می‌شود
+    (برای شبیه‌سازی خطاهای مغز مثل ContextLimitError).
+    """
+
+    def __init__(self, responses: List[Any]) -> None:
         self.responses = list(responses)
         self.sent: List[str] = []
+        self.new_chat_calls = 0
 
     def new_chat(self) -> None:
-        pass
+        self.new_chat_calls += 1
 
     def send(self, text: str) -> None:
         self.sent.append(text)
@@ -98,7 +103,10 @@ class FakeBrain:
     def wait_response(self) -> str:
         if not self.responses:
             raise RuntimeError("FakeBrain exhausted")
-        return self.responses.pop(0)
+        item = self.responses.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
 
 
 def extract_json_block(text: str) -> Optional[Dict[str, Any]]:
@@ -191,6 +199,13 @@ class AgentEngine:
         self.usage = usage                       # داشبورد مصرف
         self.checkpoints = checkpoints           # چک‌پوینت/ادامهٔ تسک
         self._subtask_depth = 0                  # عمق واگذاری (حداکثر ۱)
+        # ── پایش context چت جاری برای Auto Chat Rollover ──
+        self._chat_chars = 0                     # مجموع کاراکترهای فرستاده+گرفته در چت جاری
+        self._last_sent = ""                     # آخرین پیام ارسالی (برای تکرار پس از چرخش)
+        self._rollovers = 0                      # تعداد چرخش در تسک جاری
+        self._rollover_log: List[Dict[str, Any]] = []
+        self._current_task = ""                  # تسک در جریان (برای پیام handoff)
+        self._current_trace: List[Dict[str, Any]] = []
 
     def set_project(self, info: Dict[str, Any]) -> None:
         """تعیین پروژهٔ فعال؛ persona جدید → پرامپت سیستمی بازساخته شود."""
@@ -301,6 +316,114 @@ class AgentEngine:
                 pass
 
     # ------------------------------------------------------------------
+    # چرخش خودکار چت (Auto Chat Rollover) — عبور از سقف context بدون توقف
+    # ------------------------------------------------------------------
+
+    def _chat_reset(self) -> None:
+        self._chat_chars = 0
+        self._last_sent = ""
+
+    def _chat_est_tokens(self) -> int:
+        """تخمین مصرف چت جاری — توکن ≈ کاراکتر/۴ (متن فارسی/انگلیسی مخلوط)."""
+        return self._chat_chars // 4
+
+    def _rollover_threshold(self) -> int:
+        return int(config.DEEPSEEK_CONTEXT_TOKENS * config.ROLLOVER_AT_RATIO)
+
+    def _handoff_message(self, reason: str) -> str:
+        """پیام انتقال: راهنمای کامل پروژه (persona + حافظه + مهارت‌ها) + خلاصهٔ پیشرفت.
+
+        این پیام در چتِ تازه ساخته‌شده در سایت ارسال می‌شود تا مکالمه از همان
+        نقطه‌ای که سقف پر شد بی‌وقفه ادامه یابد — مدل هیچ‌چیز را از دست نمی‌دهد.
+        """
+        task = self._current_task
+        trace = self._current_trace or []
+        proj = dict(self.project_info)
+        persona = (proj.get("persona") or "").strip()
+        recent = trace[-14:]
+        progress = "\n".join(
+            f"- R{t.get('round')}: {t.get('tool')}({json.dumps(t.get('arguments') or {}, ensure_ascii=False)[:120]}) ok={t.get('ok')}"
+            for t in recent
+        )
+        parts = [
+            "[SYSTEM — CHAT ROLLOVER]",
+            (
+                f"The previous DeepSeek chat reached its context limit (trigger: {reason}). "
+                "A NEW chat has been created automatically for this project. "
+                "The project guide and the work-so-far summary are below. "
+                "CONTINUE the task seamlessly: do NOT greet, do NOT ask the user anything, "
+                "do NOT redo completed steps — respond with the next protocol action."
+            ),
+        ]
+        if proj:
+            parts.append(
+                f"=== PROJECT GUIDE (identity) ===\nid: {proj.get('id')} | name: {proj.get('name')} | "
+                "memory & learned skills are isolated to this project"
+            )
+        if persona:
+            parts.append("=== PROJECT GUIDE (persona, always apply) ===\n" + persona[:1500])
+        memory_ctx = self.memory.build_context(task)
+        if memory_ctx:
+            parts.append("=== PROJECT GUIDE (persistent memory) ===\n" + memory_ctx)
+        skills_ctx = self.skills.build_context(task)
+        if skills_ctx:
+            parts.append("=== PROJECT GUIDE (learned skills) ===\n" + skills_ctx)
+        parts.append(f"=== TASK IN PROGRESS ===\n{task}")
+        if progress:
+            parts.append(
+                "=== PROGRESS SO FAR (these steps are DONE; latest at the bottom) ===\n" + progress
+            )
+        return "\n\n".join(parts)
+
+    def _rollover(self, reason: str, pending: Optional[str] = None) -> None:
+        """چت جدید در سایت + پیام انتقال + ادامهٔ کار (pending در همان پیام اول تزریق می‌شود)."""
+        before = self._chat_est_tokens()
+        threshold = self._rollover_threshold()
+        self._emit("chat_rollover", reason=reason, est_tokens_before=before,
+                   threshold_tokens=threshold, rollover_no=self._rollovers + 1)
+        self._chat_reset()
+        self.brain.new_chat()
+        handoff = self._handoff_message(reason)
+        if pending:
+            handoff = handoff + "\n\n=== CONTINUE WITH THIS PENDING MESSAGE ===\n" + pending
+        self.brain.send(handoff)
+        self._chat_chars += len(handoff)
+        self._last_sent = handoff
+        self._rollovers += 1
+        self._rollover_log.append({
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
+            "reason": reason,
+            "est_tokens_before": before,
+        })
+
+    def _send(self, text: str) -> None:
+        """ارسال با پایش context: نزدیکِ سقف → چرخش خودکار و ادغام پیام در handoff.
+
+        پیام اولِ چت (وقتی هنوز چیزی نفرستاده‌ایم) هرچند بزرگ، بدون چرخش ارسال می‌شود.
+        """
+        if config.ROLLOVER_ENABLED and self._chat_chars > 0:
+            projected = (self._chat_chars + len(text)) // 4
+            if projected >= self._rollover_threshold():
+                self._rollover(reason="estimate", pending=text)
+                return
+        self.brain.send(text)
+        self._chat_chars += len(text)
+        self._last_sent = text
+
+    def _wait(self) -> str:
+        """انتظار پاسخ؛ اگر سایت خطای سقف context داد → چرخش و تکرار آخرین پیام."""
+        try:
+            raw = self.brain.wait_response()
+        except Exception as e:  # noqa: BLE001
+            # brain-agnostic: هر استثنایی با نام ContextLimitError = سقف context سایت
+            if type(e).__name__ != "ContextLimitError":
+                raise
+            self._rollover(reason="site_error", pending=self._last_sent)
+            raw = self.brain.wait_response()
+        self._chat_chars += len(raw or "")
+        return raw
+
+    # ------------------------------------------------------------------
     # اجرای تسک
     # ------------------------------------------------------------------
 
@@ -319,8 +442,14 @@ class AgentEngine:
         cp_id: Optional[str] = None
         try:
             self.enable_streaming()
+            # چرخش خودکار چت: پایش از صفر + ثبت تسک/ردِ در جریان برای پیام handoff
+            self._chat_reset()
+            self._rollovers = 0
+            self._rollover_log = []
+            self._current_task = task
+            self._current_trace = trace
             self.brain.new_chat()
-            self.brain.send(self._first_message(task))
+            self._send(self._first_message(task))
             answer, trace, errors = self._loop(task, start_round=1, trace=trace)
 
             duration = time.time() - started
@@ -362,6 +491,9 @@ class AgentEngine:
                 "reflection": reflection,
                 "duration_s": round(duration, 1),
                 "project": proj,
+                "rollovers": self._rollovers,
+                "rollover_log": list(self._rollover_log),
+                "chat_est_tokens": self._chat_est_tokens(),
             }
             self._emit("task_end", **report)
             return report
@@ -375,7 +507,7 @@ class AgentEngine:
         errors = 0
         for round_no in range(start_round, self.max_rounds + 1):
             self._emit("round", round=round_no, max_rounds=self.max_rounds)
-            raw = self.brain.wait_response()
+            raw = self._wait()
             action = parse_model_action(raw)
 
             if action is None:
@@ -421,7 +553,8 @@ class AgentEngine:
                     pass
 
             payload = f"TOOL_RESULT {tool_name}:\n" + json.dumps(result, ensure_ascii=False)
-            self.brain.send(payload)
+            # نزدیکِ سقف context؟ → چرخش خودکار چت + ادغام این نتیجه در پیام انتقال
+            self._send(payload)
         else:
             answer = (
                 f"⚠️ پس از {self.max_rounds} دورِ ابزار، پاسخ نهایی کامل نشد؛ "
@@ -453,14 +586,20 @@ class AgentEngine:
             ) or "(بدون ابزار)"
             self._emit("task_start", task=task, max_rounds=self.max_rounds, resumed=True, checkpoint=checkpoint_id)
             self.enable_streaming()
+            self._chat_reset()
+            self._rollovers = 0
+            self._rollover_log = []
+            self._current_task = task
+            trace = list(cp.get("trace", []))  # پیشرفتِ چک‌پوینت — handoff از همین می‌سازد
+            self._current_trace = trace
             self.brain.new_chat()
             first = (
                 self._first_message(task)
                 + f"\n\n=== RESUMED TASK (progress before interruption; do NOT redo completed steps) ===\n"
                 + progress
             )
-            self.brain.send(first)
-            answer, trace, errors = self._loop(task, start_round=int(cp.get("round", 0)) + 1, trace=list(cp.get("trace", [])))
+            self._send(first)
+            answer, trace, errors = self._loop(task, start_round=int(cp.get("round", 0)) + 1, trace=trace)
             duration = time.time() - started
             task_ok = bool(answer) and not answer.startswith("⚠️")
             self._emit("final", answer=answer, ok=task_ok)
@@ -474,6 +613,8 @@ class AgentEngine:
                 "errors": errors, "skill_learned": None, "lesson_learned": None,
                 "reflection": None, "duration_s": round(duration, 1),
                 "project": dict(self.project_info), "resumed_from": checkpoint_id,
+                "rollovers": self._rollovers, "rollover_log": list(self._rollover_log),
+                "chat_est_tokens": self._chat_est_tokens(),
             }
             self._emit("task_end", **report)
             return report
@@ -501,16 +642,22 @@ class AgentEngine:
         self._emit("subtask_start", role=role, task=task[:200])
         answer = ""
         trace: List[Dict[str, Any]] = []
+        # زمینهٔ والد نگه داشته شود؛ هنگام چرخشِ زیرِ زیرکار، handoff با زیرکار ساخته شود
+        parent_task = self._current_task
+        parent_trace = self._current_trace
+        sub_rollovers = 0
         try:
+            self._current_task = f"[SUBTASK - {role}] {task}"
+            self._current_trace = trace
             header = (
                 f"=== DELEGATED SUBTASK — you are now a {role.upper()} ===\n"
                 f"{SUBAGENT_ROLES[role]}\n"
                 f"Work ONLY on this subtask, then end with "
                 f'{{"final_answer": "<your subtask report>"}}\n\nSUBTASK: {task}'
             )
-            self.brain.send(header)
+            self._send(header)
             for r in range(1, cap + 1):
-                raw = self.brain.wait_response()
+                raw = self._wait()
                 action = parse_model_action(raw)
                 if action is None:
                     answer = raw
@@ -526,10 +673,11 @@ class AgentEngine:
                 result = self.registry.execute(tool_name, arguments)
                 ok = bool(result.get("ok"))
                 trace.append({"round": r, "tool": tool_name, "ok": ok})
-                self.brain.send(f"TOOL_RESULT {tool_name}:\n" + json.dumps(result, ensure_ascii=False))
+                self._send(f"TOOL_RESULT {tool_name}:\n" + json.dumps(result, ensure_ascii=False))
             else:
                 answer = f"⚠️ زیرکار پس از {cap} دور ناتمام ماند؛ خلاصهٔ دستاوردها: {len(trace)} اجرای ابزار."
             duration = time.time() - started
+            sub_rollovers = self._rollovers
             report = {
                 "ok": bool(answer) and not answer.startswith("⚠️"),
                 "role": role, "answer": answer[:4000], "rounds": len(trace),
@@ -538,6 +686,8 @@ class AgentEngine:
             self._emit("subtask_end", **report)
             return report
         finally:
+            self._current_task = parent_task
+            self._current_trace = parent_trace
             self._subtask_depth -= 1
 
     # ------------------------------------------------------------------

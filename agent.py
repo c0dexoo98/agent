@@ -207,6 +207,10 @@ def cli_event_printer(event: str, item: Dict[str, Any]) -> None:
         print(f"🧠 مهارت جدید آموخته شد: {item['name']}")
     elif event == "lesson_learned":
         print(f"📚 درس ثبت شد: {item['text'][:120]}")
+    elif event == "chat_rollover":
+        print(f"🔄 چرخش خودکار چت — سقف context؛ چت جدید ساخته شد و راهنمای پروژه منتقل شد "
+              f"(تخمین {item.get('est_tokens_before', '—')} توکن، دلیل: "
+              f"{'پیام سایت' if item.get('reason') == 'site_error' else 'نزدیکِ سقف'}) — ادامه از همان نقطه…")
 
 
 def run_cli() -> None:

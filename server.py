@@ -640,6 +640,19 @@ class DevXState:
             if event in ("task_start", "task_end", "final", "skill_learned", "reflection"):
                 proj = (item.get("project") or {}).get("id")
                 self.audit.append(event, {k: item.get(k) for k in ("task", "ok", "answer", "rounds", "name", "text") if k in item}, project=proj)
+            if event == "chat_rollover":
+                # چرخش خودکار چت — رویداد مهم، در ممیزی + اعلان
+                proj = (item.get("project") or {}).get("id")
+                self.audit.append("chat_rollover", {
+                    "reason": item.get("reason"), "est_tokens_before": item.get("est_tokens_before"),
+                    "rollover_no": item.get("rollover_no"),
+                }, project=proj)
+                self.notifications.push(
+                    "system",
+                    f"🔄 چت جدید ساخته شد (چرخش #{item.get('rollover_no')})",
+                    body=f"سقف context: تخمین {item.get('est_tokens_before')} توکن — راهنمای پروژه منتقل شد، ادامه از همان نقطه",
+                    project=proj,
+                )
             if event == "tool_result" and item.get("pending"):
                 pend = item["pending"]
                 self.notifications.push(
