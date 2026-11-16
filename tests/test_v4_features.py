@@ -136,6 +136,7 @@ def test_audit_chain_and_usage(tmp: Path) -> None:
 
 
 def test_approval_gate(tmp: Path) -> None:
+    """گیت تایید (رفتار کامل): execute منتظر تصمیم می‌ماند؛ تایید → اجرای واقعی ابزار؛ رد → پیام رد."""
     mgr, rec, mem, sk, reg = fresh(tmp)
     am = ApprovalManager(tmp / "approvals.json", ttl_s=5)
     reg.approvals = am
@@ -146,30 +147,46 @@ def test_approval_gate(tmp: Path) -> None:
     def boom(x: str):
         return {"exploded": x}
 
-    res = reg.execute("boom", {"x": "واقعی"})
-    assert not res["ok"] and res["pending_approval"]["tool"] == "boom"
-    aid = res["pending_approval"]["id"]
-    # نخِ منتظرِ موتور + تایید همزمان
+    # مسیر تایید: نخِ ابزار بلوکه می‌شود تا کاربر تصمیم بگیرد
     outcome: dict = {}
 
-    def waiter():
-        outcome["res"] = am.wait(aid, timeout_s=5)
+    def caller():
+        outcome["res"] = reg.execute("boom", {"x": "واقعی"})
 
-    th = threading.Thread(target=waiter); th.start()
+    th = threading.Thread(target=caller); th.start()
+    time.sleep(0.3)
+    pend = am.pending()
+    assert pend and pend[0]["tool"] == "boom", "درخواست تایید باید ساخته شده باشد"
+    aid = pend[0]["id"]
+    wait_out: dict = {}
+
+    def waiter():
+        wait_out["res"] = am.wait(aid, timeout_s=5)
+
+    th2 = threading.Thread(target=waiter); th2.start()
     time.sleep(0.2)
     am.resolve(aid, True)
+    th2.join(5)
+    assert wait_out["res"]["status"] == "approved"
     th.join(5)
-    assert outcome["res"]["status"] == "approved"
-    # پس از تایید، همان ابزار دیگر دروازه ندارد؟ — سیاست ثابت است؛ شبیه‌سازی اجرا مستقیم:
-    direct = reg._tools["boom"].func(x="دوباره")
-    assert direct == {"exploded": "دوباره"}
-    # مسیر رد
-    res2 = reg.execute("boom", {"x": "دوم"})
-    aid2 = res2["pending_approval"]["id"]
-    am.resolve(aid2, False)
-    assert am.wait(aid2, timeout_s=2)["status"] == "rejected"
+    assert outcome["res"]["ok"] and outcome["res"]["data"]["exploded"] == "واقعی", \
+        f"پس از تایید، ابزار باید واقعاً اجرا شده باشد: {outcome['res']}"
+    # مسیر رد: بدون اجرا، پیام رد به مدل می‌رسد
+    res2: dict = {}
+
+    def caller2():
+        res2["res"] = reg.execute("boom", {"x": "دوم"})
+
+    th3 = threading.Thread(target=caller2); th3.start()
+    time.sleep(0.3)
+    pend2 = am.pending()
+    assert pend2, "درخواست دوم باید ساخته شود"
+    am.resolve(pend2[0]["id"], False)
+    th3.join(5)
+    assert not res2["res"]["ok"] and "رد" in res2["res"]["error"], res2["res"]
+    assert "exploded" not in (res2["res"].get("data") or {}), "ابزار ردشده نباید اجرا شده باشد"
     assert am.history() and am.pending() == []
-    print("ok: approval gate (pending → approved/rejected + wait thread)")
+    print("ok: approval gate (wait → executed on approve / rejected path)")
 
 
 def test_sandbox_and_fs_jail(tmp: Path) -> None:
@@ -214,11 +231,17 @@ def test_http_get_local(tmp: Path) -> None:
     port = srv.server_address[1]
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
-        r = http_get(f"http://127.0.0.1:{port}/", max_chars=2000)
-        assert r["ok"] and "DevX test page" in r["content"] and "ignore()" not in r["content"]
+        # گارد SSRF: آدرس لوکال در http_get مسدود است (ضد واکشی سرویس محلی/متادیتا)
+        blocked = http_get(f"http://127.0.0.1:{port}/", max_chars=2000)
+        assert not blocked["ok"] and "مجاز نیست" in blocked["error"], blocked
+        # استخراج HTML→متن همچنان با _fetch مستقیم (زیرِ گاردِ لایهٔ ابزار) سنجیده می‌شود
+        from web_tools import _fetch, html_to_text
+        raw = _fetch(f"http://127.0.0.1:{port}/", timeout=5)
+        text = html_to_text(raw)
+        assert "DevX test page" in text and "ignore()" not in text
     finally:
         srv.shutdown()
-    print("ok: http_get (local server + html→text + script strip)")
+    print("ok: http_get (SSRF guard blocks localhost + html→text via direct fetch)")
 
 
 def test_timemachine_and_bundles(tmp: Path) -> None:

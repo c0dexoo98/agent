@@ -88,7 +88,13 @@ class WebhookWatcher:
     # ------------------------------------------------------------------
 
     def poll_once(self, watch: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """یک بار وضعیت مخزن را بخوان و تغییرها را برگردان (None = بدون تغییر/خطا)."""
+        """یک بار وضعیت مخزن را بخوان و تغییرها را برگردان (None = بدون تغییر/خطا).
+
+        نکته: به‌روزرسانی last_state باید روی رکورد واقعیِ ذخیره‌شده انجام شود
+        نه روی کپی — وگرنه هر بار «اولین سنجش» تفسیر می‌شود و هیچ‌وقت اعلانی
+        نمی‌آید (باگ نسخهٔ قبل). متدهای gh مستقیم صدا زده می‌شوند (نه از طریق
+        رجیستری)، پس خروجی کلید ok ندارد و مستقیماً کلید داده خوانده می‌شود.
+        """
         gh = self.gh_provider() if self.gh_provider else None
         if gh is None:
             return None
@@ -96,33 +102,39 @@ class WebhookWatcher:
         try:
             if "issues" in watch["events"]:
                 res = gh.list_issues(watch["repo"], state="open", limit=30)
-                issues = res.get("issues", []) if res.get("ok") else []
+                issues = res.get("issues", [])
                 state["issues_open"] = len(issues)
                 state["issues_latest"] = issues[0].get("number") if issues else None
             if "prs" in watch["events"]:
                 res = gh.list_pull_requests(watch["repo"], state="open", limit=30)
-                prs = res.get("prs", []) if res.get("ok") else []
+                prs = res.get("pull_requests", [])
                 state["prs_open"] = len(prs)
                 state["prs_latest"] = prs[0].get("number") if prs else None
             if "commits" in watch["events"]:
                 res = gh.list_commits(watch["repo"], limit=1)
-                cs = res.get("commits", []) if res.get("ok") else []
+                cs = res.get("commits", [])
                 state["commit_latest"] = (cs[0].get("sha") or "")[:10] if cs else None
         except Exception as e:  # noqa: BLE001
             return {"error": str(e)}
-        change = {k: v for k, v in state.items() if watch.get("last_state", {}).get(k) != v and k not in ("error",)}
-        if not watch.get("last_state"):
-            # اولین سنجش → فقط ذخیره، بدون اعلان
-            watch["last_state"] = state
-            self.save()
+
+        # رکورد واقعی در self._watches پیدا و به‌روزرسانی شود (کپی ورودی کافی نیست)
+        with self._lock:
+            real = next((w for w in self._watches if w.get("id") == watch.get("id")), None)
+            if real is None:
+                return None  # بین کپی و پول حذف شده
+            change = {k: v for k, v in state.items() if real.get("last_state", {}).get(k) != v}
+            if not real.get("last_state"):
+                # اولین سنجش → فقط ذخیره، بدون اعلان
+                real["last_state"] = state
+                self.save()
+                return None
+            if change:
+                change_obj = {"from": real.get("last_state"), "to": state}
+                real["last_state"] = state
+                real["last_change"] = change_obj
+                self.save()
+                return change_obj
             return None
-        if change:
-            change_obj = {"from": watch.get("last_state"), "to": state}
-            watch["last_state"] = state
-            watch["last_change"] = change_obj
-            self.save()
-            return change_obj
-        return None
 
     def _loop(self) -> None:
         while not self._stop.is_set():

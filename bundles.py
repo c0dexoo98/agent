@@ -21,6 +21,17 @@ import config
 FORMAT_VERSION = 1
 
 
+def _safe_join(base: Path, rel: str) -> Optional[Path]:
+    """پیوست امن نام نسبی به پایه — ضد Zip-Slip؛ خروج از پایه → None."""
+    if not rel or rel.startswith("/") or "\\" in rel:
+        return None
+    cand = (base / rel).resolve()
+    base_r = base.resolve()
+    if cand != base_r and base_r not in cand.parents:
+        return None
+    return cand
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
@@ -77,11 +88,13 @@ def import_project(zip_path: Path, project_mgr: Any, memory_root: Path, skills_r
                 if n == "_meta.json":
                     continue
                 if n.startswith("memory/"):
-                    dest = mdir / n[len("memory/"):]
+                    dest = _safe_join(mdir, n[len("memory/"):])
                 elif n.startswith("skills/"):
-                    dest = sdir / n[len("skills/"):]
+                    dest = _safe_join(sdir, n[len("skills/"):])
                 else:
                     continue
+                if dest is None:
+                    continue  # مسیر ناامن (Zip-Slip) رد می‌شود
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 with z.open(n) as fsrc, open(dest, "wb") as fdst:
                     shutil.copyfileobj(fsrc, fdst)
@@ -91,8 +104,7 @@ def import_project(zip_path: Path, project_mgr: Any, memory_root: Path, skills_r
                 (mdir / "sessions.json").write_text(meta["sessions"], encoding="utf-8")
             tc = int(old.get("task_count", 0) or 0)
             if tc and rec.get("key"):
-                project_mgr.record_task(rec["key"]) if False else None  # شمارش تسک از رکورد اصلی حفظ شود
-                rec["task_count"] = tc
+                rec["task_count"] = tc  # rec رکورد زندهٔ پروژهٔ تازه است
                 project_mgr.save()
         return {"ok": True, "project": rec, "restored": restored, "source": old}
     except zipfile.BadZipFile:

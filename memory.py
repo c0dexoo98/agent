@@ -155,7 +155,13 @@ class MemoryStore:
                         self._index.add(f"{section}:{it['id']}", text)
                     self.save()
                     return {"ok": True, "dedup": True, "item": it}
-            item = {"id": int(time.time() * 1000), "text": text, "ts": _now_iso(), "hits": 0,
+            # شناسهٔ یکتا: پایهٔ میلی‌ثانیه + پرش روی برخورد (دو آیتم در همان ms)
+            new_id = int(time.time() * 1000)
+            taken = {int(x.get("id", 0)) for s in self.SECTIONS for x in self._data[s]}
+            taken |= {int(x.get("id", 0)) for x in self._archived}
+            while new_id in taken:
+                new_id += 1
+            item = {"id": new_id, "text": text, "ts": _now_iso(), "hits": 0,
                     "pinned": False, "tags": clean_tags}
             items.append(item)
             if len(items) > cap:

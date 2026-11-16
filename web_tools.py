@@ -13,11 +13,39 @@ import re
 import urllib.error
 import urllib.request
 from typing import Any, Dict, List
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 
 UA = "Mozilla/5.0 (X11; Linux x86_64) DevX-Agent/4.0"
 DEFAULT_TIMEOUT = 20
 MAX_BYTES = 1_500_000
+
+# محدوده‌های خصوصی/لوکال — ضد SSRF: مدل نباید سرویس محلی/شبکهٔ داخلی را واکشی کند
+_PRIVATE_HOST_RE = re.compile(
+    r"^(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|"
+    r"172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|169\.254\.\d+\.\d+|0\.0\.0\.0|\[::1\]|::1|\[::ffff:127\.0\.0\.1\])$",
+    re.IGNORECASE,
+)
+
+
+def _is_private_host(url: str) -> bool:
+    try:
+        host = (urlparse(url).hostname or "").strip().lower()
+    except Exception:
+        return True
+    if not host:
+        return True
+    if _PRIVATE_HOST_RE.match(host):
+        return True
+    # نام‌های داخلی رایج
+    if host.endswith((".local", ".internal", ".lan", ".home")) or host == "metadata.google.internal":
+        return True
+    # hostname که اصلاً IP است و در regex نیفتاد — بررسی عددی
+    try:
+        import ipaddress
+        ip = ipaddress.ip_address(host)
+        return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_unspecified
+    except ValueError:
+        return False  # نام دامنهٔ عمومی
 
 
 def _fetch(url: str, timeout: int = DEFAULT_TIMEOUT) -> str:
@@ -49,6 +77,8 @@ def html_to_text(raw: str) -> str:
 def http_get(url: str, max_chars: int = 12000, timeout: int = DEFAULT_TIMEOUT) -> Dict[str, Any]:
     if not re.match(r"^https?://", url or ""):
         return {"ok": False, "error": "فقط URLهای http/https مجاز است"}
+    if _is_private_host(url):
+        return {"ok": False, "error": "واکشی آدرس‌های لوکال/شبکهٔ خصوصی (127.0.0.1، 10.x، 192.168.x، …) مجاز نیست"}
     try:
         raw = _fetch(url, timeout=timeout)
     except urllib.error.HTTPError as e:

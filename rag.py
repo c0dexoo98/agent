@@ -28,8 +28,8 @@ def normalize_fa(text: str) -> str:
     t = (text or "").lower()
     t = t.replace("\u200c", " ").replace("\u064a", "ی").replace("\u0643", "ک")
     t = re.sub(r"[\u064B-\u0652\u0670]", "", t)          # اِعراب
-    t = re.sub(r"[۰-۹]", lambda m: str("۰۱۲۳۴۵۶۷۸۹".index(m.group(0))), t)
-    t = re.sub(r"[\u06F0-\u06F9]", lambda m: str("\u06F0\u06F1\u06F2\u06F3\u06F4\u06F5\u06F6\u06F7\u06F8\u06F9".index(m.group(0))), t)
+    t = re.sub(r"[\u06F0-\u06F9]", lambda m: str("۰۱۲۳۴۵۶۷۸۹".index(m.group(0))), t)   # ارقام فارسی
+    t = re.sub(r"[\u0660-\u0669]", lambda m: str("٠١٢٣٤٥٦٧٨٩".index(m.group(0))), t)   # ارقام عربی
     return t
 
 

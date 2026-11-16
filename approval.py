@@ -61,6 +61,7 @@ class ApprovalManager:
     def request(self, tool: str, arguments: Dict[str, Any], project: Optional[int] = None) -> Dict[str, Any]:
         """ساخت درخواست تایید — خروجی برای مدل: pending_approval."""
         with self._cond:
+            self._gc()
             aid = f"ap-{self._next_id}"
             self._next_id += 1
             item = {
@@ -76,6 +77,14 @@ class ApprovalManager:
             self._items[aid] = item
             self.save()
             return item
+
+    def _gc(self) -> None:
+        """تکلیف‌شده‌های کهنه پاک می‌شوند (pendingها دست‌نخورده) — صف بی‌نهایت نشود."""
+        if len(self._items) <= 200:
+            return
+        resolved = [k for k, v in self._items.items() if v.get("status") in ("approved", "rejected", "timeout")]
+        for k in resolved[:-100]:  # آخرین ۱۰۰ تکلیف‌شده به‌عنوان تاریخچه می‌ماند
+            del self._items[k]
 
     def wait(self, approval_id: str, timeout_s: Optional[int] = None) -> Dict[str, Any]:
         """انتظارِ نخِ موتور تا تایید/رد/تایم‌اوت — مقدار برشمردهٔ وضعیت نهایی."""

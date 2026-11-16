@@ -76,22 +76,41 @@ class TimeMachine:
         restored = 0
         with zipfile.ZipFile(src) as z:
             names = [n for n in z.namelist() if n != "_meta.json"]
-            # پاک‌سازی هدف‌ها (فقط فایل‌های درون‌مانده این نوع‌ها)
-            for base, target in (("memory/", Path(memory_dir)), ("skills/", Path(skills_dir))):
+            # ضد Zip-Slip: فقط نام‌های امن (در مقصد زیرمجموعه بمانند) — بقیه رد می‌شوند
+            def _dest_of(n: str) -> Optional[Path]:
+                if n.startswith("memory/"):
+                    return _safe_join(Path(memory_dir), n[len("memory/"):])
+                if n.startswith("skills/"):
+                    return _safe_join(Path(skills_dir), n[len("skills/"):])
+                return None
+            planned = [(n, _dest_of(n)) for n in names]
+            planned = [(n, d) for n, d in planned if d is not None]
+            skipped = len(names) - len(planned)
+            # پاک‌سازی فقط هدف‌هایی که این snapshot واقعاً برایشان فایل دارد
+            # (قبلاً هر دو دایرکتوری پاک می‌شد حتی اگر zip فقط یکی را داشت — از دست دادن داده)
+            for prefix, target in (("memory/", Path(memory_dir)), ("skills/", Path(skills_dir))):
+                if not any(n.startswith(prefix) for n, _ in planned):
+                    continue
                 if not target.exists():
                     continue
                 for p in list(target.rglob("*")):
                     if p.is_file() and p.name != "projects.json":  # projects.json متعلق به ریشه است
                         p.unlink()
-            for n in names:
-                if n.startswith("memory/"):
-                    dest = Path(memory_dir) / n[len("memory/"):]
-                elif n.startswith("skills/"):
-                    dest = Path(skills_dir) / n[len("skills/"):]
-                else:
-                    continue
+            for n, dest in planned:
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 with z.open(n) as fsrc, open(dest, "wb") as fdst:
                     shutil.copyfileobj(fsrc, fdst)
                 restored += 1
-        return {"ok": True, "snapshot": snapshot_id, "restored": restored}
+        note = f" ({skipped} مسیر ناامن رد شد)" if skipped else ""
+        return {"ok": True, "snapshot": snapshot_id, "restored": restored, "note": note.strip()}
+
+
+def _safe_join(base: Path, rel: str) -> Optional[Path]:
+    """پیوست امن نام نسبی به پایه — خروج از پایه (../، مسیر مطلق، symlink) → None."""
+    if not rel or rel.startswith("/") or "\\" in rel:
+        return None
+    cand = (base / rel).resolve()
+    base_r = base.resolve()
+    if cand != base_r and base_r not in cand.parents:
+        return None
+    return cand

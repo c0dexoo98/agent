@@ -109,6 +109,8 @@ def _fs_write(path: Path, content: str, append: bool) -> Dict[str, Any]:
 
 
 def _fs_delete(path: Path, trash: Path) -> Dict[str, Any]:
+    if path == trash.parent:
+        return {"ok": False, "error": "حذف ریشهٔ workspace مجاز نیست"}
     if path == path.resolve().parent:
         return {"ok": False, "error": "حذف ریشه مجاز نیست"}
     if not path.exists():

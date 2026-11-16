@@ -645,7 +645,6 @@ class AgentEngine:
         # زمینهٔ والد نگه داشته شود؛ هنگام چرخشِ زیرِ زیرکار، handoff با زیرکار ساخته شود
         parent_task = self._current_task
         parent_trace = self._current_trace
-        sub_rollovers = 0
         try:
             self._current_task = f"[SUBTASK - {role}] {task}"
             self._current_trace = trace
@@ -677,11 +676,11 @@ class AgentEngine:
             else:
                 answer = f"⚠️ زیرکار پس از {cap} دور ناتمام ماند؛ خلاصهٔ دستاوردها: {len(trace)} اجرای ابزار."
             duration = time.time() - started
-            sub_rollovers = self._rollovers
             report = {
                 "ok": bool(answer) and not answer.startswith("⚠️"),
                 "role": role, "answer": answer[:4000], "rounds": len(trace),
                 "tools": trace, "duration_s": round(duration, 1),
+                "rollovers": self._rollovers,  # چرخش‌های انجام‌شده تا پایان این زیرکار
             }
             self._emit("subtask_end", **report)
             return report

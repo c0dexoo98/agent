@@ -237,10 +237,33 @@ def run_cli() -> None:
     if gh_tools is not None:
         hardened = harden_github_tools(gh_tools, rate_limiter, max_attempts=config.RETRY_MAX_ATTEMPTS)
         print(f"🛡 ابزارهای گیت‌هاب محافظت شدند (نرخ {config.RATELIMIT_GH_PER_MIN}/min + بازتلاش ×{config.RETRY_MAX_ATTEMPTS}) — {hardened} متد")
-    scheduler = Scheduler(config.BASE_DIR / "jobs.json", fire_callback=lambda job: _run(engine, job["task"], projects))
+    notifications_ref = notifications  # همان مرکز اعلان ساخته‌شده در بالا
+    # موتور بعداً ساخته می‌شود (بعد از ورود مرورگر) — holder تا فایرِ زودهنگامِ زمان‌بند NameError ندهد
+    engine_holder: List[AgentEngine] = []
+
+    def _scheduled_fire(job: Dict[str, Any]) -> None:
+        """اجرای job زمان‌بندی در CLI — اگر موتور هنوز آماده/آزاد نبود، فقط اعلان."""
+        eng = engine_holder[0] if engine_holder else None
+        if eng is None:
+            notifications_ref.push("schedule", f"⏰ {job['name']}: موتور هنوز آماده نیست — این‌بار اجرا نشد")
+            return
+        if eng.busy:
+            notifications_ref.push("schedule", f"⏰ {job['name']}: موتور مشغول است — این‌بار اجرا نشد")
+            return
+        _run(eng, job["task"], projects)
+
+    scheduler = Scheduler(config.BASE_DIR / "jobs.json", fire_callback=_scheduled_fire)
     if config.SCHEDULER_ENABLED:
         scheduler.start()
-    watcher = WebhookWatcher(config.BASE_DIR / "watches.json", gh_provider=lambda: gh_tools)
+
+    def _on_watch_change(watch: Dict[str, Any], change: Dict[str, Any]) -> None:
+        """تغییر مخزن زیرنظر → اعلان در مرکز (بدون اجرای خودکار در CLI)."""
+        import json as _json
+        notifications_ref.push("watch", f"👀 تغییر در {watch.get('repo')}",
+                               body=_json.dumps(change.get("to", change), ensure_ascii=False)[:180])
+
+    watcher = WebhookWatcher(config.BASE_DIR / "watches.json", gh_provider=lambda: gh_tools,
+                             on_change=_on_watch_change)
     if config.WATCHER_ENABLED:
         watcher.start()
 
@@ -281,6 +304,7 @@ def run_cli() -> None:
     ))
     engine.register_delegate_tool()
     engine.set_project({"id": rec["id"], "name": rec["name"], "key": rec["key"], "persona": rec.get("persona", "")})
+    engine_holder.append(engine)  # از این نقطه jobهای زمان‌بندی مجاز به اجرا هستند
 
     def _cli_apply(rec2: Dict[str, Any]) -> None:
         """سوییچ کامل CLI به پروژهٔ دیگر (حافظه/مهارت/رجیستری/سشن)."""
@@ -404,7 +428,12 @@ def run_cli() -> None:
                 if kind == "daily":
                     spec = {"kind": "daily", "at": input("ساعت HH:MM (UTC): ").strip()}
                 else:
-                    spec = {"kind": "interval", "every_s": int(input("هر چند ثانیه [3600]: ").strip() or 3600)}
+                    try:
+                        every = int(input("هر چند ثانیه [3600]: ").strip() or 3600)
+                    except ValueError:
+                        print("❌ عدد نامعتبر\n")
+                        continue
+                    spec = {"kind": "interval", "every_s": every}
                 res = scheduler.add(rec["id"], t[:30], t, spec)
                 print(("✅ ثبت شد — " + json.dumps(res["job"], ensure_ascii=False)[:140] + "\n") if res.get("ok") else f"❌ {res.get('error')}\n")
                 continue

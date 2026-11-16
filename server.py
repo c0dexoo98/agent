@@ -146,7 +146,16 @@ class DevXState:
         registry.audit = self.audit
         registry.approval_policy = self._approval_policy
         registry.project_provider = lambda: (self.projects.active() or {}).get("id")
+        registry.on_approval_requested = self._on_approval_requested
         return registry
+
+    def _on_approval_requested(self, pend: Dict[str, Any]) -> None:
+        """کارت/اعلان تایید انسانی در UI (از درون گیتِ رجیستری)."""
+        self.notifications.push(
+            "approval", f"⚠️ تایید لازم است: {pend.get('tool')}",
+            body=json.dumps(pend.get("arguments", {}), ensure_ascii=False)[:200],
+        )
+        self.bus.emit("approval_requested", **pend)
 
     def _approval_policy(self, tool_name: str) -> bool:
         """سیاست تایید: پروژه با allow_dangerous=true از دروازه عبور می‌کند."""
@@ -482,6 +491,7 @@ class DevXState:
         registry.project_provider = lambda: rec["id"]
         allow = bool((rec.get("settings") or {}).get("allow_dangerous"))
         registry.approval_policy = lambda name: not allow
+        registry.on_approval_requested = self._on_approval_requested
         return registry
 
     def _ephemeral_run(self, project_id: int, task: str, source: str) -> None:
@@ -752,6 +762,15 @@ class DevXHandler(BaseHTTPRequestHandler):
     # ---------------- routes ----------------
 
     def do_GET(self) -> None:  # noqa: N802
+        try:
+            self._do_get()
+        except Exception as e:  # noqa: BLE001 — ورودی بد/خطای داخلی نباید اتصال را بی‌پاسخ بگذارد
+            try:
+                self._send_json({"ok": False, "error": f"خطای سرور: {e}"}, status=500)
+            except Exception:
+                pass
+
+    def _do_get(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path
         qs = parse_qs(parsed.query)
@@ -857,6 +876,15 @@ class DevXHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": False, "error": "not found"}, status=404)
 
     def do_POST(self) -> None:  # noqa: N802
+        try:
+            self._do_post()
+        except Exception as e:  # noqa: BLE001 — ورودی بد/خطای داخلی نباید اتصال را بی‌پاسخ بگذارد
+            try:
+                self._send_json({"ok": False, "error": f"خطای سرور: {e}"}, status=500)
+            except Exception:
+                pass
+
+    def _do_post(self) -> None:
         path = urlparse(self.path).path
         body = self._read_json_body()
         if path == "/api/token":

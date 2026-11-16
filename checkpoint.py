@@ -10,10 +10,14 @@ from __future__ import annotations
 
 import config
 import json
+import re
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+# شناسهٔ چک‌پوینت فقط این شکل مجاز است — ضد تراویسل مسیر در load/mark (مثل "../../memory/…")
+_CP_ID_RE = re.compile(r"^cp-\d{1,16}$")
 
 
 def _now_iso() -> str:
@@ -38,18 +42,22 @@ class CheckpointStore:
         partial: str = "",
         status: str = "running",
     ) -> Dict[str, Any]:
-        cp = {
-            "id": f"cp-{int(datetime.now().timestamp() * 1000)}",
-            "ts": _now_iso(),
-            "task": task[:400],
-            "project": {"id": project.get("id"), "name": project.get("name"), "key": project.get("key")},
-            "session_id": session_id,
-            "round": int(round_no),
-            "trace": trace,
-            "partial": (partial or "")[:2000],
-            "status": status,
-        }
         with self._lock:
+            # شناسهٔ یکتا حتی در همان میلی‌ثانیه (دو ذخیرهٔ هم‌زمان)
+            cp_id = int(datetime.now().timestamp() * 1000)
+            while (self.base / f"cp-{cp_id}.json").exists():
+                cp_id += 1
+            cp = {
+                "id": f"cp-{cp_id}",
+                "ts": _now_iso(),
+                "task": task[:400],
+                "project": {"id": project.get("id"), "name": project.get("name"), "key": project.get("key")},
+                "session_id": session_id,
+                "round": int(round_no),
+                "trace": trace,
+                "partial": (partial or "")[:2000],
+                "status": status,
+            }
             (self.base / f"{cp['id']}.json").write_text(
                 json.dumps(cp, ensure_ascii=False, indent=1), encoding="utf-8"
             )
@@ -66,6 +74,9 @@ class CheckpointStore:
                 pass
 
     def load(self, checkpoint_id: str) -> Optional[Dict[str, Any]]:
+        checkpoint_id = str(checkpoint_id)
+        if not _CP_ID_RE.match(checkpoint_id):
+            return None
         p = self.base / f"{checkpoint_id}.json"
         if not p.exists():
             return None
@@ -84,12 +95,16 @@ class CheckpointStore:
         return out
 
     def mark(self, checkpoint_id: str, status: str) -> None:
-        p = self.base / f"{checkpoint_id}.json"
-        if not p.exists():
+        checkpoint_id = str(checkpoint_id)
+        if not _CP_ID_RE.match(checkpoint_id):
             return
-        try:
-            data = json.loads(p.read_text(encoding="utf-8"))
-            data["status"] = status
-            p.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-        except Exception:
-            pass
+        with self._lock:
+            p = self.base / f"{checkpoint_id}.json"
+            if not p.exists():
+                return
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+                data["status"] = status
+                p.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+            except Exception:
+                pass

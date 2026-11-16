@@ -12,7 +12,9 @@
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -28,7 +30,11 @@ def run_in_sandbox(
     timeout: Optional[int] = None,
     max_output: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """اجرای امن یک دستور؛ خروجی ساختاریافته برای مدل: {ok, exit, stdout, stderr, duration_s}"""
+    """اجرای امن یک دستور؛ خروجی ساختاریافته برای مدل: {ok, exit, stdout, stderr, duration_s}
+
+    تایم‌اوت سخت: کل گروه پروسه کشته می‌شود (نه فقط فرزند) تا فرزندهای سرگردان
+    (چیلدهای اسکریپت) پاکسازی شوند — با start_new_session و killpg.
+    """
     timeout = int(timeout or config.SANDBOX_TIMEOUT)
     max_output = int(max_output or config.SANDBOX_MAX_OUTPUT)
     if not argv or not isinstance(argv, list):
@@ -37,27 +43,39 @@ def run_in_sandbox(
     workdir.mkdir(parents=True, exist_ok=True)
     env = {k: os.environ[k] for k in _ENV_ALLOW if k in os.environ}
     env.setdefault("PYTHONUNBUFFERED", "1")
-    import time as _t
-    started = _t.monotonic()
+    started = time.monotonic()
     try:
-        proc = subprocess.run(  # noqa: S603 — argv لیستی است، شل درگیر نیست
+        proc = subprocess.Popen(  # noqa: S603 — argv لیستی است، شل درگیر نیست
             argv,
             cwd=str(workdir),
             env=env,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL,
             shell=False,
+            text=True,
+            start_new_session=True,   # گروه پروسهٔ جدا → kill کل درخت
         )
-        out = (proc.stdout or "")[:max_output]
-        err = (proc.stderr or "")[:max_output]
-        if len(proc.stdout or "") > max_output:
-            out += f"\n... [کوتاه‌شد از {len(proc.stdout)} کاراکتر]"
+        try:
+            out, err = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                proc.kill()
+            out, err = proc.communicate()
+            return {"ok": False, "error": f"تایم‌اوت {timeout}s — کل گروه پروسه کشته شد",
+                    "timeout": timeout,
+                    "stdout": (out or "")[:max_output], "stderr": (err or "")[:max_output]}
+        out = out or ""
+        err = err or ""
+        out_full = out
+        if len(out) > max_output:
+            out = out[:max_output] + f"\n... [کوتاه‌شد از {len(out_full)} کاراکتر]"
+        if len(err) > max_output:
+            err = err[:max_output] + f"\n... [کوتاه‌شد از {len(err)} کاراکتر]"
         return {"ok": proc.returncode == 0, "exit": proc.returncode, "stdout": out, "stderr": err,
-                "duration_s": round(_t.monotonic() - started, 2), "workdir": str(workdir)}
-    except subprocess.TimeoutExpired:
-        return {"ok": False, "error": f"تایم‌اوت {timeout}s — پروسه کشته شد", "timeout": timeout}
+                "duration_s": round(time.monotonic() - started, 2), "workdir": str(workdir)}
     except FileNotFoundError as e:
         return {"ok": False, "error": f"فرمان یافت نشد: {e.filename}"}
     except Exception as e:  # noqa: BLE001

@@ -735,7 +735,7 @@ function md(s){ // رندر مارک‌داون سبک: bold / code / link / خ�
   return esc(s)
     .replace(/`([^`]+)`/g,'<code style="font-family:var(--mono);color:var(--yellow);background:rgba(255,210,63,.08);padding:1px 5px;border-radius:4px;font-size:12px">$1</code>')
     .replace(/\*\*([^*]+)\*\*/g,'<b style="color:var(--yellow)">$1</b>')
-    .replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g,'<a href="$2" target="_blank" style="color:var(--teal)">$1</a>');
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,(m,label,url)=>`<a href="${url.replace(/"/g,'%22').replace(/'/g,'%27')}" target="_blank" rel="noopener noreferrer" style="color:var(--teal)">${label}</a>`);
 }
 function toast(kind,msg,ms=4200){
   const t=document.createElement('div');t.className='toast '+kind;t.innerHTML=msg;
@@ -947,12 +947,14 @@ function fillProjList(items,active,nextDefault){
   if(!items||!items.length){
     list.innerHTML='<div class="mem-item">هنوز پروژه‌ای نیست — نام پروژهٔ اول را بنویس.</div>';return;
   }
+  // نام‌ها از طریق map خوانده می‌شوند (بدون درج رشته در onclick — ضد نام‌های خاص)
+  window.__projMap={};items.forEach(p=>{window.__projMap[p.id]=p.name;});
   list.innerHTML=items.map(p=>`
     <div class="proj-item ${active&&active.id===p.id?'active':''}" onclick="selectProject(${p.id})">
       <span class="pid">#${p.id}</span>
-      <span class="pname" title="دبل‌کلیک: تغییر نام" ondblclick="event.stopPropagation();renameProject(${p.id},'${esc(p.name).replace(/'/g,"\\'")}')">${esc(p.name)}</span>
+      <span class="pname" title="دبل‌کلیک: تغییر نام" ondblclick="event.stopPropagation();renameProject(${p.id})">${esc(p.name)}</span>
       <span class="pstats">${p.task_count||0} tasks</span>
-      <button class="del" onclick="event.stopPropagation();deleteProject(${p.id},'${esc(p.name).replace(/'/g,"\\'")}')">🗑</button>
+      <button class="del" onclick="event.stopPropagation();deleteProject(${p.id})">🗑</button>
     </div>`).join('');
 }
 async function createProject(){
@@ -983,7 +985,8 @@ async function selectProject(id){
     closeProjModal();startNewChatView();refreshAll();
   }else toast('err','⛔ '+esc(j.error||'سوییچ ناموفق'));
 }
-async function deleteProject(id,name){
+async function deleteProject(id){
+  const name=(window.__projMap||{})[id]||`#${id}`;
   if(!confirm(`پروژهٔ «${name}» با کل حافظه و مهارت‌هایش حذف شود؟\nآیدی پروژه‌های بعدی خودکار بازچینش می‌شود.`))return;
   const r=await fetch('/api/projects/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
   const j=await r.json();
@@ -992,7 +995,8 @@ async function deleteProject(id,name){
     startNewChatView();refreshAll();
   }else toast('err','⛔ '+esc(j.error||'حذف ناموفق'));
 }
-async function renameProject(id,old){
+async function renameProject(id){
+  const old=(window.__projMap||{})[id]||'';
   const name=prompt('نام جدید پروژه:',old);
   if(!name||name===old)return;
   const r=await fetch('/api/projects/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,name})});
@@ -1153,8 +1157,9 @@ async function loadSessions(){
 }
 function renderSessions(items,activeId){
   const bar=$('sessTabs');if(!bar)return;
+  window.__sessMap={};(items||[]).forEach(s=>{window.__sessMap[s.id]=s.title;});
   bar.innerHTML=(items||[]).map(s=>`
-    <span class="sess-tab ${s.id===activeId?'active':''}" onclick="selectSession(${s.id})" ondblclick="renameSession(${s.id},'${esc(s.title).replace(/'/g,"\\'")}')">
+    <span class="sess-tab ${s.id===activeId?'active':''}" onclick="selectSession(${s.id})" ondblclick="renameSession(${s.id})">
       ${esc(s.title)} <span class="cnt">${s.task_count||0}</span>
     </span>`).join('');
 }
@@ -1169,7 +1174,8 @@ async function createSession(){
   const j=await r.json();
   if(j.ok){toast('ok',`💬 سشن «${esc(j.session.title)}» ساخته شد (آیدی ${j.session.id})`);startNewChatView();loadSessions();}
 }
-async function renameSession(id,old){
+async function renameSession(id){
+  const old=(window.__sessMap||{})[id]||'';
   const t=prompt('عنوان جدید سشن:',old);if(!t||t===old)return;
   await fetch('/api/sessions/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,title:t})});
   loadSessions();

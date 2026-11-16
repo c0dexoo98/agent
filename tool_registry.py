@@ -38,7 +38,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
-from config import TOOL_RESULT_MAX_CHARS
+from config import APPROVAL_TIMEOUT, TOOL_RESULT_MAX_CHARS
 
 
 @dataclass
@@ -64,6 +64,8 @@ class ToolRegistry:
         self.approval_policy: Any = None                 # callable(tool_name)->bool (نیاز به تایید؟)
         self.audit: Any = None                           # audit.AuditLog
         self.project_provider: Any = None                # callable()->Optional[int]  (پروژهٔ فعال)
+        # callback اعلان تایید (سرور: اعلان + رویداد UI) — ورودی: dict درخواست
+        self.on_approval_requested: Optional[Callable[[Dict[str, Any]], None]] = None
 
     # ------------------------------------------------------------------
     # ثبت ابزار
@@ -180,14 +182,23 @@ class ToolRegistry:
             req = self.approvals.request(name, arguments, project=proj)
             if self.audit is not None:
                 self.audit.append("approval_requested", {"approval_id": req["id"], "tool": name, "arguments": arguments}, project=proj)
-            return {
-                "ok": False,
-                "pending_approval": {"id": req["id"], "tool": name, "arguments": arguments, "ttl": self.approvals.ttl_s},
-                "error": (
-                    f"ابزار '{name}' خطرناک است و به تایید انسانی نیاز دارد — "
-                    f"درخواست {req['id']} ساخته شد؛ نتیجه پس از تصمیم کاربر به شما می‌رسد."
-                ),
-            }
+            if self.on_approval_requested is not None:
+                try:
+                    self.on_approval_requested({"id": req["id"], "tool": name, "arguments": arguments, "ttl": APPROVAL_TIMEOUT})
+                except Exception:
+                    pass
+            # نخِ موتور تا تصمیم کاربر/TTL منتظر می‌ماند؛ در تایید، ابزار عیناً اجرا می‌شود
+            decision = self.approvals.wait(req["id"], timeout_s=APPROVAL_TIMEOUT)
+            if self.audit is not None:
+                self.audit.append("approval_resolved", {"approval_id": req["id"], "tool": name, "status": decision["status"]}, project=proj)
+            if decision["status"] != "approved":
+                reason = {
+                    "rejected": "کاربر عملیات را رد کرد",
+                    "timeout": f"تایید انسانی در {APPROVAL_TIMEOUT} ثانیه داده نشد (تایم‌اوت)",
+                    "missing": "درخواست تایید یافت نشد",
+                }.get(decision["status"], decision["status"])
+                return {"ok": False, "error": f"ابزار '{name}' اجرا نشد: {reason} — مسیر امن‌تری انتخاب کن."}
+            # تایید شده → ادامه به اجرای واقعی
 
         try:
             result = tool.func(**arguments)
@@ -264,9 +275,22 @@ class ToolRegistry:
         """تبدیل هر خروجی ابزار به ساختار JSON-سازگار + کوتاه‌سازی رشته‌های طولانی."""
         try:
             json.dumps(value, ensure_ascii=False)
-            return self._truncate(value)
+            data = value
         except (TypeError, ValueError):
-            return self._truncate(json.loads(json.dumps(value, ensure_ascii=False, default=str)))
+            data = json.loads(json.dumps(value, ensure_ascii=False, default=str))
+        data = self._truncate(data)
+        # سقف «کل» خروجی: dict با صدها کلید کوتاه می‌تواند به مگابایت‌ها برسد
+        try:
+            if len(json.dumps(data, ensure_ascii=False)) > TOOL_RESULT_MAX_CHARS * 4:
+                return {
+                    "truncated": True,
+                    "preview": json.dumps(data, ensure_ascii=False)[:TOOL_RESULT_MAX_CHARS],
+                    "note": f"خروجی از {TOOL_RESULT_MAX_CHARS * 4} کاراکتر بزرگ‌تر بود — پیش‌نمایش اولیه آمد؛ "
+                            "درخواست دقیق‌تر/کوچک‌تر بده (مثلاً limit کمتر یا فیلتر).",
+                }
+        except Exception:
+            pass
+        return data
 
     def _truncate(self, value: Any) -> Any:
         limit = TOOL_RESULT_MAX_CHARS
