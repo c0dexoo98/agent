@@ -181,6 +181,7 @@ python tests/test_pass4.py           # پاس ۴: تایید/سندباکس/نر
 python tests/test_cli_runtime.py     # پاس ۵: کلاینت تعاملی CLI با FakeBrain + stdin اسکریپت‌شده
 python tests/test_soak.py            # پاس ۵: soak حافظه (~۱۰۰s: ۱۲۰ اتصال SSE + tracemalloc)
 python tests/test_fuzz.py            # پاس ۶: ۹۱۵ ورودی خراب به همه endpoint ها + کلاینت SSE کُند
+python tests/test_durability.py      # پاس ۷: نژ نوشتن همزمان + SIGKILL وسط کار → restart → state کامل
 python tests/test_stress.py          # بار همزمان: ۱۶۴ درخواست ۸-نخی + اعتبار زنجیرهٔ ممیزی
 python tests/test_server_smoke.py    # سرور واقعی: UI + API پروژه‌ها + SSE + جریان کامل تسک
 GH_TOKEN=ghp_xxx python tests/test_github_readonly.py   # فقط‌خواندنی با API واقعی
@@ -344,3 +345,16 @@ agent/
 | ۷ | ✅ **کلاینت SSE کُند** | مشترکی که هیچ نمی‌خواند: ۱۰۰۰ رویداد در ~۰ ثانیه عبور کردند (مسیر drop صف ۸۰۰تایی با `put_nowait` کار می‌کند)، سرور پاسخ‌گو ماند و مشترک تازه رویداد زنده گرفت |
 
 **تست‌ها:** ۱۲ سوئیت — static / core / projects / v4-features / bugfixes / bugfixes2 / pass4 / cli-runtime / soak / **fuzz (جدید)** / stress / server-smoke — همه سبز.
+
+## 🛡️ v4.7 — پاس هفتم: پیمایش مسیر، نژ همزمانی، دوام kill-restart
+
+چهار زاویهٔ خصمانهٔ باقی‌مانده — این پاس **باگ جدیدی پیدا نکرد**؛ همهٔ سطوح مقاوم ظاهر شدند و حالا با تست رگرسیون قفل شده‌اند:
+
+| زاویه | نتیجه |
+|-------|-------|
+| **پیمایش مسیر (Path Traversal)** | همهٔ ورودی‌های مسیرساز سخت‌گیری شده‌اند: کلید پروژه uuid تازه است (نه نام کاربر)، `_slugify` برای مهارت‌ها (`/` و `.` حذف)، `^cp-\d{1,16}$` برای چک‌پوینت‌ها، `_safe_join` ضد Zip-Slip برای import/restore، UI از فایل ثابت سرو می‌شود (بدون static dir)؛ import بسته هرگز از کلید داخل zip استفاده نمی‌کند |
+| **نژ نوشتن همزمان** | ۱۱ نخ موازی: ۳۶ ساخت پروژه + ۸ job زمان‌بند + خواننده‌های همزمان → صفر آیدی تکراری، صفر به‌روزرسانی مفقود، همهٔ فایل‌های state JSON معتبر؛ کلید داخلی پروژه هم به API عمومی درز نمی‌کند |
+| **دوام kill-restart** | ۶ نخ وسط نوشتنِ ۴۴۵ پروژه، سرور با **SIGKILL** کشته شد (بدون shutdown تمیز) → بعد از restart هر ۴۴۵ پروژه + job + snapshot + زنجیرهٔ ممیزی سالم برگشتند و نوشتن جدید کار کرد — proof پایان‌به‌انتهاِ الگوی اتمیک tmp+`replace` |
+| **سازگاری زمان** | scheduler/usage/notifications همگی `datetime.now(timezone.utc)` — بدون ناسازگاری local/UTC؛ error-path های github_tools هم همه exception را می‌گیرند |
+
+**تست‌ها:** ۱۳ سوئیت — static / core / projects / v4-features / bugfixes / bugfixes2 / pass4 / cli-runtime / soak / fuzz / **durability (جدید)** / stress / server-smoke — همه سبز.
