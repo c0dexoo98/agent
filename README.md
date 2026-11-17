@@ -182,6 +182,7 @@ python tests/test_cli_runtime.py     # پاس ۵: کلاینت تعاملی CLI 
 python tests/test_soak.py            # پاس ۵: soak حافظه (~۱۰۰s: ۱۲۰ اتصال SSE + tracemalloc)
 python tests/test_fuzz.py            # پاس ۶: ۹۱۵ ورودی خراب به همه endpoint ها + کلاینت SSE کُند
 python tests/test_durability.py      # پاس ۷: نژ نوشتن همزمان + SIGKILL وسط کار → restart → state کامل
+python tests/test_semantics.py       # پاس ۸: شلیک زمان‌بند با ساعت جابه‌جا + صحت RAG فارسی + round-trip
 python tests/test_stress.py          # بار همزمان: ۱۶۴ درخواست ۸-نخی + اعتبار زنجیرهٔ ممیزی
 python tests/test_server_smoke.py    # سرور واقعی: UI + API پروژه‌ها + SSE + جریان کامل تسک
 GH_TOKEN=ghp_xxx python tests/test_github_readonly.py   # فقط‌خواندنی با API واقعی
@@ -358,3 +359,17 @@ agent/
 | **سازگاری زمان** | scheduler/usage/notifications همگی `datetime.now(timezone.utc)` — بدون ناسازگاری local/UTC؛ error-path های github_tools هم همه exception را می‌گیرند |
 
 **تست‌ها:** ۱۳ سوئیت — static / core / projects / v4-features / bugfixes / bugfixes2 / pass4 / cli-runtime / soak / fuzz / **durability (جدید)** / stress / server-smoke — همه سبز.
+
+## ⏱️ v4.8 — پاس هشتم: معنای شلیک زمان‌بند، RAG فارسی، round-trip و تست زندهٔ گیت‌هاب
+
+این پاس سطح‌هایی را تست کرد که به‌خاطر فاصلهٔ حداقل ۳۰ ثانیه / نیاز به سرویس واقعی، با تست معمولی نمی‌رسیدند:
+
+| زاویه | نتیجه |
+|-------|-------|
+| **شلیک زمان‌بند (ساعت جابه‌جا)** | ساعت سیستم monkeypatch شد و حلقهٔ واقعی `_loop` چرخید: daily دقیقاً در لحظهٔ due شلیک می‌شود و next_run به «فردا» می‌رود؛ موعد ازدست‌رفتهٔ ۸روزه فقط «یک‌بار» جبران می‌شود (نه طوفان)؛ فعال‌سازی دوباره موعد را از نو تنظیم می‌کند (re-arm، نه شلیکِ بازماندهٔ کهنه)؛ exception در callback حلقه را نمی‌کشد — همه ✔ بدون باگ |
+| **صحت RAG فارسی** | رتبه‌بندی TF-IDF سند درست را اول برمی‌گرداند؛ نرمال‌سازی ي/ك عربی و ارقام فارسی جستجو را مقاوم می‌کند؛ `remove` سند را واقعاً حذف می‌کند — ✔ بدون باگ |
+| **وفاداری round-trip خروجی→ورود** | پروژه با نام/persona/حافظه/سشن/مهارت → export → import → همهٔ داده‌ها سالم برگشتند — ✔ بدون باگ |
+| **تست زندهٔ گیت‌هاب (۱۵/۱۵)** | با API واقعی اجرا شد: احراز توکن، مخزن‌ها، شاخه‌ها، محتوا، کامیت‌ها، جستجو، نرخ، و هندل درست ۴۰۴ — آخرین سطح تست‌نشده پوشش داده شد |
+| 🟠 **تست flaky وابسته به ساعت روز** | ادعای «فردا شدن daily» در test_pass4 فقط بین ۰۰:۰۰ تا ۰۴:۰۰ UTC پاس می‌شد (>۲۰ ساعت فاصله) — باتری‌های قبلی اتفاقاً در آن پنجره اجرا شده بودند؛ با مقایسهٔ «تاریخِ دقیقِ فردا» قطعی شد |
+
+**تست‌ها:** ۱۴ سوئیت — static / core / projects / v4-features / bugfixes / bugfixes2 / pass4 / cli-runtime / soak / fuzz / durability / **semantics (جدید)** / stress / server-smoke — همه سبز (به‌علاوهٔ ۱۵ تست زندهٔ گیت‌هاب).

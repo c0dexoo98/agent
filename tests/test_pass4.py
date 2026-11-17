@@ -235,10 +235,15 @@ def test_scheduler_due_advance_persistence(tmp: Path) -> None:
     sch._advance(j, datetime.now(timezone.utc))
     assert j["run_count"] == 1 and j["last_run"]
     assert (datetime.fromisoformat(j["next_run"]) - datetime.now(timezone.utc)).total_seconds() > 50
-    # daily گذشته → فردا
+    # daily گذشته → فردا (مقایسهٔ تاریخ دقیق — وابسته به ساعتِ اجرای تست نباشد؛ باگ پاس ۸)
+    t0 = datetime.now(timezone.utc)
     d = {"kind": "daily", "at": "00:00"}
-    sch._advance(d, datetime.now(timezone.utc))
-    assert (datetime.fromisoformat(d["next_run"]) - datetime.now(timezone.utc)).total_seconds() > 20 * 3600
+    sch._advance(d, t0)
+    expected = t0.replace(hour=0, minute=0, second=0, microsecond=0)
+    if expected <= t0:
+        expected += timedelta(days=1)
+    assert abs((datetime.fromisoformat(d["next_run"]) - expected).total_seconds()) < 2, (
+        f"rollover اشتباه: {d['next_run']} ≠ {expected.isoformat()}")
     # disabled → due=False
     j["enabled"] = False
     assert sch._due(j, datetime.now(timezone.utc)) is False
