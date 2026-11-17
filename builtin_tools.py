@@ -8,7 +8,7 @@ morx-gms2-mcp که ده‌ها ابزار به مدل می‌دهد — اضاف
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict
 from zoneinfo import ZoneInfo
 

@@ -34,7 +34,7 @@ from approval import ApprovalManager
 from audit import AuditLog
 from builtin_tools import register_builtin_tools
 from checkpoint import CheckpointStore
-from deepseek_client import DeepSeekClient, LoginRequired
+from deepseek_client import DeepSeekClient
 from fs_tools import register_fs_tools
 from github_tools import GitHubTools, TokenInvalidError, register_github_tools
 from memory import MemoryStore, register_memory_tools
@@ -238,7 +238,7 @@ class DevXState:
         self.audit.append("project_deleted", {"name": res["deleted"]["name"]}, project=int(project_id))
         self.bus.emit("project_deleted", deleted=self._pub(res["deleted"]), projects=self.projects_list())
         self.bus.emit("projects_updated", projects=self.projects_list(), active=self._active_pub())
-        return {"ok": True, "deleted": self._pub(res["deleted"]), "renumbered": True}
+        return {"ok": True, "deleted": self._pub(res["deleted"])}
 
     def rename_project(self, project_id: int, name: str) -> Dict[str, Any]:
         res = self.projects.rename(int(project_id), name)
@@ -534,6 +534,8 @@ class DevXState:
     def _on_job_fire(self, job: Dict[str, Any]) -> None:
         self.audit.append("schedule_fired", {"job": job["name"], "task": job["task"][:120]}, project=job["project_id"])
         self.notifications.push("schedule", f"⏰ اجرای خودکار: {job['name']}", body=job["task"][:160], project=job["project_id"])
+        # رویداد زنده برای UI (قبلاً فقط watch_changed emit می‌شد و case این رویداد در UI مرده بود)
+        self.bus.emit("schedule_fired", job=job["name"], task=job["task"][:160], project_id=job["project_id"])
         self._ephemeral_run(job["project_id"], job["task"], "schedule")
 
     def _on_watch_change(self, watch: Dict[str, Any], change: Dict[str, Any]) -> None:
@@ -680,6 +682,7 @@ class DevXState:
     def snapshot(self) -> Dict[str, Any]:
         pend = self.approvals.pending()
         return {
+            "ok": True,  # یکدستی با بقیهٔ اندپوینت‌ها (پاس ۳)
             "token": {
                 "set": self.token_info is not None,
                 "login": (self.token_info or {}).get("login"),

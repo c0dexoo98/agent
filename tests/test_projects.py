@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""تست آفلاین مدیریت پروژه‌های DevX: آیدی فشرده، بازچینش پس از حذف، ایزولاسیون حافظه."""
+"""تست آفلاین مدیریت پروژه‌های DevX: آیدی پایدار، حذف بدون بازچینش، ایزولاسیون حافظه."""
 from __future__ import annotations
 
 import json
@@ -56,24 +56,24 @@ def test_create_and_dense_ids(tmp: Path) -> None:
     print("ok: create (auto id + default name + auto-select + persist)")
 
 
-def test_delete_renumber(tmp: Path) -> None:
+def test_delete_stable_ids(tmp: Path) -> None:
     mgr = make_env(tmp)
     a, b, c = mgr.create("الف"), mgr.create("ب"), mgr.create("ج")
-    # حذف آیدی 2 → پروژهٔ 3 به 2 منتقل می‌شود («آیدی بعدی جایگزین حذف‌شده»)
+    # حذف آیدی 2 → آیدی بقیه پایدار می‌ماند (ارجاع‌های jobs/watches سالم بمانند)
     res = mgr.delete(b["id"])
-    assert res["ok"] and res["renumbered"]
+    assert res["ok"]
     ids = [p["id"] for p in mgr.list()]
-    assert ids == [1, 2], f"آیدی فشرده نیست: {ids}"
-    assert mgr.get(2)["name"] == "ج" and mgr.get(2)["key"] == c["key"]  # داده با کلید پایدار دست‌نخورده
+    assert ids == [1, 3], f"آیدی نباید جابه‌جا شود: {ids}"
+    assert mgr.get(3)["name"] == "ج" and mgr.get(3)["key"] == c["key"]  # داده با کلید پایدار دست‌نخورده
     # حذف فعال → فعال به آخرین می‌رود
-    res2 = mgr.delete(c["id"])
+    mgr.delete(c["id"])
     assert mgr.active_key == a["key"] and len(mgr.list()) == 1
-    # آیدی جدید بعد از بازچینش = بعدِ آخر
+    # آیدی جدید ادامهٔ شمارندهٔ یکه است، نه بازیافت آیدی حذف‌شده
     d = mgr.create("د")
-    assert d["id"] == 2
+    assert d["id"] == 4
     # حذف نامعتبر
     assert "error" in mgr.get(99)
-    print("ok: delete → dense renumber + stable keys + active reassign")
+    print("ok: delete → stable ids (no renumber) + monotonic next id + active reassign")
 
 
 def test_isolation(tmp: Path) -> None:
@@ -170,7 +170,7 @@ if __name__ == "__main__":
     tmp = Path(tempfile.mkdtemp(prefix="devx_projects_"))
     try:
         test_create_and_dense_ids(tmp / "a")
-        test_delete_renumber(tmp / "b")
+        test_delete_stable_ids(tmp / "b")
         test_isolation(tmp / "c")
         test_rename_select_persist(tmp / "d")
         test_legacy_migration(tmp / "e")

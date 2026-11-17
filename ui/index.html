@@ -657,7 +657,7 @@ main{display:grid;grid-template-columns:1fr 340px;gap:16px;padding:16px 22px;max
     </div>
     <div class="sub" style="margin-top:16px;margin-bottom:4px">یا ادامهٔ یکی از پروژه‌های موجود:</div>
     <div class="proj-list" id="projList"></div>
-    <div class="renum-hint" id="renumHint">💡 با حذف هر پروژه، آیدی پروژه‌های بعدی خودکار بازچینش می‌شود تا آیدی‌ها همیشه فشرده (۱، ۲، ۳، …) بمانند.</div>
+    <div class="renum-hint" id="renumHint">💡 آیدی هر پروژه پایدار و یکتاست؛ با حذف یک پروژه آیدی بقیه تغییر نمی‌کند تا ارجاع‌های زمان‌بند و نگهبان مخزن سالم بمانند.</div>
   </div>
 </div>
 
@@ -987,11 +987,11 @@ async function selectProject(id){
 }
 async function deleteProject(id){
   const name=(window.__projMap||{})[id]||`#${id}`;
-  if(!confirm(`پروژهٔ «${name}» با کل حافظه و مهارت‌هایش حذف شود؟\nآیدی پروژه‌های بعدی خودکار بازچینش می‌شود.`))return;
+  if(!confirm(`پروژهٔ «${name}» با کل حافظه و مهارت‌هایش حذف شود؟\nآیدی پروژه‌های دیگر تغییری نمی‌کند.`))return;
   const r=await fetch('/api/projects/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
   const j=await r.json();
   if(j.ok){
-    toast('ok',`🗑 پروژهٔ «${esc(j.deleted.name)}» حذف شد — آیدی‌ها بازچینش شدند (فشرده: ۱،۲،۳،…)`);
+    toast('ok',`🗑 پروژهٔ «${esc(j.deleted.name)}» حذف شد — آیدی پروژه‌های دیگر پایدار ماند`);
     startNewChatView();refreshAll();
   }else toast('err','⛔ '+esc(j.error||'حذف ناموفق'));
 }
@@ -1141,7 +1141,7 @@ es.onmessage=ev=>{
     case 'project_switched':
       toast('ok',`🎯 پروژهٔ فعال: <b>#${m.project.id} ${esc(m.project.name)}</b> — حافظهٔ ایزوله`);break;
     case 'project_deleted':
-      toast('info',`🗑 پروژهٔ «${esc(m.deleted.name)}» حذف شد — آیدی‌ها بازچینش شدند`);break;
+      toast('info',`🗑 پروژهٔ «${esc(m.deleted.name)}» حذف شد`);break;
     case 'projects_updated': refreshAll(); break;
   }
 };

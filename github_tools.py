@@ -34,8 +34,6 @@ from typing import Any, Dict, List, Optional
 from github import Auth, Github, GithubException
 from github.Repository import Repository
 
-from config import TOOL_RESULT_MAX_CHARS
-
 
 class TokenInvalidError(Exception):
     """وقتی توکن ۴۰۱ بدهد (نامعتبر یا باطل‌شده)."""

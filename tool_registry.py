@@ -302,7 +302,7 @@ class ToolRegistry:
             out = {}
             for k, v in value.items():
                 if isinstance(v, str) and len(v) > limit:
-                    out[k] = v[:limit] + f"... [کوتاه‌شد]"
+                    out[k] = v[:limit] + "... [کوتاه‌شد]"
                 else:
                     out[k] = self._truncate(v)
             return out

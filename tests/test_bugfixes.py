@@ -241,7 +241,6 @@ def test_registry_total_cap(tmp: Path) -> None:
 
 def test_server_input_robustness(tmp: Path) -> None:
     """ورودی غیرعددی در مسیرهای عددی سرور → ۵۰۰ JSON نه قطع اتصال."""
-    from server import DevXHandler  # فقط ایمپورت/کامپایل و مسیر _safe_int_call
     from server import _safe_int_call
     assert _safe_int_call({"id": "abc"}, "id", lambda i: {"ok": True})["ok"] is False
     print("ok: server input guards (non-numeric id rejected)")

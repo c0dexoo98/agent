@@ -39,7 +39,7 @@ from approval import ApprovalManager
 from audit import AuditLog
 from builtin_tools import register_builtin_tools
 from checkpoint import CheckpointStore
-from deepseek_client import DeepSeekClient, DeepSeekError
+from deepseek_client import DeepSeekClient
 from fs_tools import register_fs_tools
 from github_tools import GitHubTools, TokenInvalidError, register_github_tools
 from memory import MemoryStore, register_memory_tools
@@ -391,7 +391,7 @@ def run_cli() -> None:
                     print("لغو شد.\n")
                     continue
                 res = projects.delete(victim["id"])
-                print(f"🗑 حذف شد؛ آیدی‌ها بازچینش شدند: " + ", ".join(f"{p['id']}={p['name']}" for p in projects.list()) + "\n")
+                print("🗑 حذف شد (آیدی پروژه‌های دیگر پایدار می‌ماند): " + ", ".join(f"{p['id']}={p['name']}" for p in projects.list()) + "\n")
                 new_active = projects.active()
                 if new_active:
                     _cli_apply(new_active)

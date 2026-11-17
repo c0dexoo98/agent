@@ -29,7 +29,6 @@ from checkpoint import CheckpointStore  # noqa: E402
 from fs_tools import register_fs_tools  # noqa: E402
 from memory import MemoryStore, register_memory_tools  # noqa: E402
 from projects import ProjectManager  # noqa: E402
-from rag import SemanticIndex  # noqa: E402
 from sandbox import run_in_sandbox  # noqa: E402
 from scheduler import Scheduler  # noqa: E402
 from sessions import SessionManager  # noqa: E402
@@ -321,7 +320,6 @@ def test_scheduler_sessions(tmp: Path) -> None:
 def test_engine_v4(tmp: Path) -> None:
     """زیرایجنت + بازتاب + چک‌پوینت/Resume + persona + usage موتور."""
     mgr, rec, mem, sk, reg = fresh(tmp)
-    projects2 = mgr
     ck = CheckpointStore(tmp / "cps")
     ut = UsageTracker(tmp / "usage.json")
     bus = EventBus()

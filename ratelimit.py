@@ -18,7 +18,7 @@ import random
 import threading
 import time
 from functools import wraps
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Callable, Optional
 
 
 class RateLimiter:

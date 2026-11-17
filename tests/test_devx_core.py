@@ -145,8 +145,6 @@ def test_engine(tmp: Path) -> None:
     print("ok: engine failure → lesson learned")
 
     # قفل هم‌زمانی: تسک دوم هنگام busy رد می‌شود
-    from typing import List as _L
-
     class SlowBrain:
         def new_chat(self): pass
         def send(self, t): pass

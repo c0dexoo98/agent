@@ -439,7 +439,6 @@ class AgentEngine:
         answer = ""
         trace: List[Dict[str, Any]] = []
         errors = 0
-        cp_id: Optional[str] = None
         try:
             self.enable_streaming()
             # چرخش خودکار چت: پایش از صفر + ثبت تسک/ردِ در جریان برای پیام handoff
@@ -595,7 +594,7 @@ class AgentEngine:
             self.brain.new_chat()
             first = (
                 self._first_message(task)
-                + f"\n\n=== RESUMED TASK (progress before interruption; do NOT redo completed steps) ===\n"
+                + "\n\n=== RESUMED TASK (progress before interruption; do NOT redo completed steps) ===\n"
                 + progress
             )
             self._send(first)

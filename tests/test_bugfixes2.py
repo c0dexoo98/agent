@@ -71,6 +71,27 @@ def test_fs_search_path_pattern(tmp: Path) -> None:
     print("ok: fs_search path-aware pattern (sub/*.py works)")
 
 
+def test_fs_list_works(tmp: Path) -> None:
+    """fs_list از ابتدا با NameError می‌شکست (_meta داخل closure بود و در سطح ماژول تعریف نبود)."""
+    reg = ToolRegistry()
+    ws = tmp / "ws2"
+    (ws / "sub").mkdir(parents=True)
+    (ws / "sub" / "a.txt").write_text("hi", encoding="utf-8")
+    (ws / "top.txt").write_text("t", encoding="utf-8")
+    register_fs_tools(reg, ws)
+    r = reg.execute("fs_list", {"path": ""})["data"]
+    assert r["ok"], r
+    names = {i["name"] for i in r["items"]}
+    assert names == {"sub", "top.txt"}, r
+    r2 = reg.execute("fs_list", {"path": "sub"})["data"]
+    assert r2["ok"] and r2["items"][0]["name"] == "a.txt" and r2["items"][0]["size"] == 2, r2
+    r3 = reg.execute("fs_list", {"path": "sub/a.txt"})["data"]  # فایل تکی
+    assert r3["ok"] and r3["items"][0]["type"] == "file", r3
+    r4 = reg.execute("fs_list", {"path": "ناموجود"})["data"]
+    assert not r4["ok"], r4
+    print("ok: fs_list works (dir, single file, missing path)")
+
+
 def test_import_skill_md_only(tmp: Path) -> None:
     """import_skill فقط فایل .md بپذیرد."""
     lib = SkillLibrary(skills_dir=tmp / "sk")
@@ -120,6 +141,45 @@ def test_usage_summary_totals(tmp: Path) -> None:
     print("ok: usage.summary totals under lock")
 
 
+def test_jobs_survive_project_delete(tmp: Path) -> None:
+    """بازچینش آیدیِ پروژه، ارجاع jobs/watches را به پروژهٔ اشتباه وصل می‌کرد — آیدی‌ها حالا پایدارند."""
+    from projects import ProjectManager
+    from scheduler import Scheduler
+
+    mgr = ProjectManager(memory_root=tmp / "mem", skills_root=tmp / "sk")
+    p1, p2, p3 = mgr.create("یک"), mgr.create("دو"), mgr.create("سه")
+    sch = Scheduler(tmp / "jobs.json", fire_callback=None)
+    assert sch.add(p3["id"], "جاب", "تسک", {"kind": "daily", "at": "23:59"})["ok"]
+    mgr.delete(p1["id"])  # قبلاً این کار p3 را از آیدی ۳ به ۲ می‌برد و جاب به «دو» اشاره می‌کرد
+    assert mgr.get(3)["name"] == "سه"
+    jobs = sch.list()
+    assert jobs and jobs[0]["project_id"] == 3
+    assert mgr.get(jobs[0]["project_id"])["key"] == p3["key"], "جاب باید همچنان به «سه» اشاره کند"
+    # آیدی جدید بازیافت نمی‌شود
+    assert mgr.create("چهار")["id"] == 4
+    print("ok: scheduler job keeps pointing at the same project after another project is deleted")
+
+
+def test_audit_chain_concurrent(tmp: Path) -> None:
+    """زنجیرهٔ ممیزی زیر append همزمان نباید بشکند (seq قبلاً بیرون از قفل ساخته می‌شد)."""
+    from audit import AuditLog
+
+    log = AuditLog(tmp / "chain.jsonl")
+
+    def hammer(n: int) -> None:
+        for i in range(n):
+            log.append("stress", {"i": i, "t": threading.get_ident() % 9999})
+
+    threads = [threading.Thread(target=hammer, args=(25,)) for _ in range(16)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    v = log.verify()
+    assert v["ok"] and v["broken_at"] is None and v["entries"] == 400, v
+    seqs = [e["seq"] for e in log.list(limit=400)]
+    assert sorted(seqs) == list(range(1, 401)), "seq ها باید یکتا و پیوسته باشند"
+    print("ok: audit chain survives 400 concurrent appends (unique contiguous seqs)")
+
+
 def test_sse_replay_marker() -> None:
     """تاریخچهٔ SSE باید برچسب replay بگیرد (UI کارت تکراری نسازد) و snapshot بدون برچسب بماند."""
     import server as srv
@@ -167,10 +227,13 @@ if __name__ == "__main__":
     try:
         test_watcher_interval_respected(tmp / "a")
         test_fs_search_path_pattern(tmp / "b")
+        test_fs_list_works(tmp / "b2")
         test_import_skill_md_only(tmp / "c")
         test_zip_dir_entries_skipped(tmp / "d")
         test_sessions_active_fallback(tmp / "e")
         test_usage_summary_totals(tmp / "f")
+        test_jobs_survive_project_delete(tmp / "g")
+        test_audit_chain_concurrent(tmp / "h")
         test_sse_replay_marker()
         test_ui_replay_guard_static()
         print("\nALL PASS-2 REGRESSION TESTS PASSED ✅")

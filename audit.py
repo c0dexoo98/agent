@@ -67,17 +67,21 @@ class AuditLog:
         project: Optional[int] = None,
         actor: str = "agent",
     ) -> Dict[str, Any]:
-        entry: Dict[str, Any] = {
-            "seq": len(self._entries) + 1,
-            "ts": _now_iso(),
-            "event": str(event),
-            "project": project,
-            "actor": actor,
-            "data": data or {},
-        }
+        # کل ساخت ورودی زیر قفل — قبلاً seq بیرون از قفل از len() ساخته می‌شد و
+        # دو append همزمان seq تکراری می‌ساختند و زنجیره را می‌شکستند (باگ پاس ۳)
         with self._lock:
-            entry["prev"] = self._prev
-            entry["hash"] = hashlib.sha256(_canon({k: v for k, v in entry.items() if k != "hash"}).encode("utf-8")).hexdigest()
+            entry: Dict[str, Any] = {
+                "seq": len(self._entries) + 1,
+                "ts": _now_iso(),
+                "event": str(event),
+                "project": project,
+                "actor": actor,
+                "data": data or {},
+                "prev": self._prev,
+            }
+            entry["hash"] = hashlib.sha256(
+                _canon({k: v for k, v in entry.items() if k != "hash"}).encode("utf-8")
+            ).hexdigest()
             self._entries.append(entry)
             self._prev = entry["hash"]
             self.path.parent.mkdir(parents=True, exist_ok=True)

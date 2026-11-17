@@ -30,14 +30,6 @@ def register_fs_tools(registry: Any, workspace: Path) -> None:
             raise PermissionError(f"مسیر خارج از workspace پروژه است: {p}")
         return cand
 
-    def _meta(p: Path) -> Dict[str, Any]:
-        return {
-            "name": p.name or str(p),
-            "type": "dir" if p.is_dir() else "file",
-            "size": p.stat().st_size if p.is_file() else None,
-            "path": str(p.relative_to(root)),
-        }
-
     R(
         name="fs_list",
         description="فهرست فایل/پوشه‌های workspace پروژه (مسیر نسبی؛ خالی = ریشه)",
@@ -75,17 +67,28 @@ def register_fs_tools(registry: Any, workspace: Path) -> None:
     )
 
 
+def _meta(p: Path, root: Path) -> Dict[str, Any]:
+    """فرادادهٔ یک ورودی — سطح ماژول (باگ قدیمی: closure داخل register بود و
+    fs_list که ماژول‌سطح است با NameError می‌شکست؛ ابزار fs_list از ابتدا خراب بود)."""
+    return {
+        "name": p.name or str(p),
+        "type": "dir" if p.is_dir() else "file",
+        "size": p.stat().st_size if p.is_file() else None,
+        "path": str(p.relative_to(root)),
+    }
+
+
 def _fs_list(target: Path, root: Path) -> Dict[str, Any]:
     if not target.exists():
         return {"ok": False, "error": "مسیر وجود ندارد"}
     if target.is_file():
-        return {"ok": True, "items": [_meta(target)]}
+        return {"ok": True, "items": [_meta(target, root)]}
     items = []
     for child in sorted(target.iterdir(), key=lambda p: (p.is_file(), p.name.lower())):
         if child.name in IGNORED_NAMES:
             continue
         try:
-            items.append(_meta(child))
+            items.append(_meta(child, root))
         except OSError:
             continue
     return {"ok": True, "root": str(target.relative_to(root)) or ".", "items": items}

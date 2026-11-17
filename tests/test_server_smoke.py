@@ -80,14 +80,14 @@ def main() -> None:
         status, raw = req("/api/projects/select", "POST", {"id": p2["id"]})
         status, raw = req("/api/memory?section=all")
         assert any("پروژهٔ دوم" in f["text"] for f in json.loads(raw)["facts"])
-        # حذف p2 → p1 بازچینش می‌شود (آیدی فشرده)
+        # حذف p2 → آیدی p1 پایدار می‌ماند (بدون بازچینش — ارجاع‌های بیرونی سالم)
         status, raw = req("/api/projects/delete", "POST", {"id": p2["id"]})
-        assert json.loads(raw)["ok"] and json.loads(raw)["renumbered"]
+        assert json.loads(raw)["ok"]
         status, raw = req("/api/projects")
         pj = json.loads(raw)
-        assert [p["id"] for p in pj["projects"]] == [1], "آیدی‌ها باید فشرده باشند"
-        assert pj["active"]["id"] == 1
-        print("ok: projects API (auto-id, isolation, delete+renumber)", flush=True)
+        assert [p["id"] for p in pj["projects"]] == [p1["id"]], "پروژهٔ باقی‌مانده همان آیدی قبلی را دارد"
+        assert pj["active"]["id"] == p1["id"]
+        print("ok: projects API (auto-id, isolation, delete keeps ids stable)", flush=True)
 
         # ۴) تسک بدون مغزِ پاسخ‌ده → FakeBrain خالی → خطای مهربان task_end
         status, raw = req("/api/task", "POST", {"task": "تست دود سرور"})

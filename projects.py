@@ -22,7 +22,6 @@
 from __future__ import annotations
 
 import json
-import re
 import shutil
 import threading
 import uuid
@@ -57,7 +56,7 @@ class ProjectManager:
         self.legacy_skills_dir = Path(legacy_skills_dir or self.skills_root)
         self.file = self.memory_root / "projects.json"
         self._lock = threading.RLock()
-        self._data: Dict[str, Any] = {"projects": [], "active_key": None, "default_seq": 0}
+        self._data: Dict[str, Any] = {"projects": [], "active_key": None, "default_seq": 0, "id_seq": 0}
         self._load()
         self._migrate_legacy()
 
@@ -71,10 +70,16 @@ class ProjectManager:
         try:
             raw = json.loads(self.file.read_text(encoding="utf-8"))
             if isinstance(raw, dict):
+                projects = raw.get("projects", []) or []
                 self._data = {
-                    "projects": raw.get("projects", []) or [],
+                    "projects": projects,
                     "active_key": raw.get("active_key"),
                     "default_seq": int(raw.get("default_seq", 0)),
+                    # شمارندهٔ یکهٔ آیدی — مهاجرت فایل‌های قدیمی: حداقل بزرگ‌ترین آیدی موجود
+                    "id_seq": max(
+                        int(raw.get("id_seq", 0)),
+                        max((int(p.get("id", 0)) for p in projects), default=0),
+                    ),
                 }
         except Exception as e:
             try:
@@ -140,12 +145,6 @@ class ProjectManager:
     # CRUD
     # ------------------------------------------------------------------
 
-    def _renumber(self) -> None:
-        """آیدی فشرده: پس از حذف، پروژه‌های بعدی جای پروژه‌های قبلی را می‌گیرند."""
-        self._data["projects"].sort(key=lambda p: p["id"])
-        for i, p in enumerate(self._data["projects"], start=1):
-            p["id"] = i
-
     def create(self, name: Optional[str] = None) -> Dict[str, Any]:
         """پروژهٔ جدید؛ اگر نام داده نشود «پروژه N» (N ادامهٔ شمارندهٔ همیشگی)."""
         name = (name or "").strip()
@@ -155,9 +154,12 @@ class ProjectManager:
                 name = f"پروژه {self._data['default_seq']}"
             if len(name) > 60:
                 name = name[:60]
+            # آیدی یکه و پایدار: هرگز بازیافت یا جابه‌جا نمی‌شود — ارجاع‌های
+            # jobs/watches/notifications به پروژهٔ اشتباه نیفتند
+            self._data["id_seq"] += 1
             rec = {
                 "key": _new_key(),
-                "id": len(self._data["projects"]) + 1,
+                "id": self._data["id_seq"],
                 "name": name,
                 "created": _now_iso(),
                 "last_used": _now_iso(),
@@ -202,17 +204,18 @@ class ProjectManager:
         return {"ok": True, "settings": rec["settings"]}
 
     def delete(self, project_id: int) -> Dict[str, Any]:
-        """حذف پروژه + بازچینش آیدی‌ها (آیدی بعدی جایگزین حذف‌شده می‌شود).
+        """حذف پروژه — آیدی پروژه‌های دیگر پایدار می‌ماند (بدون بازچینش).
 
         دایرکتوری‌های داده با کلید پایدار ساخته شده‌اند؛ دادهٔ پروژه‌های دیگر
-        دست‌نخورده می‌ماند و فقط دادهٔ همان پروژه پاک می‌شود.
+        دست‌نخورده می‌ماند و فقط دادهٔ همان پروژه پاک می‌شود. آیدی‌ها دیگر
+        بازچینش نمی‌شوند تا ارجاع‌های jobs/watches به پروژهٔ اشتباه نیفتند
+        (باگ قدیمی: حذف یک پروژه، زمان‌بند/نگهبان پروژهٔ دیگر را می‌ربود).
         """
         with self._lock:
             victim = self.get(project_id)
             if "error" in victim:
                 return victim
             self._data["projects"] = [p for p in self._data["projects"] if p["key"] != victim["key"]]
-            self._renumber()
             if self._data["active_key"] == victim["key"]:
                 self._data["active_key"] = self._data["projects"][-1]["key"] if self._data["projects"] else None
             self._save()
@@ -220,7 +223,7 @@ class ProjectManager:
             for d in (self.memory_dir(victim["key"]), self.skills_dir(victim["key"])):
                 if d.exists():
                     shutil.rmtree(d, ignore_errors=True)
-            return {"ok": True, "deleted": victim, "renumbered": True}
+            return {"ok": True, "deleted": victim}
 
     def rename(self, project_id: int, name: str) -> Dict[str, Any]:
         name = (name or "").strip()[:60]
@@ -276,7 +279,6 @@ class ProjectManager:
 
     def list(self) -> List[Dict[str, Any]]:
         with self._lock:
-            self._renumber()
             return [dict(p) for p in self._data["projects"]]
 
     @property
