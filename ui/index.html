@@ -3,816 +3,1088 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DevX — DeepSeek × GitHub Agent</title>
+<title>DevX Studio — ایجنت DevX</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
 /* ═══════════════════════════════════════════════════════════════════
-   DevX UI — تم قرمز/مشکی + اکسنت فیروزه‌ای و زرد، افکت‌های چشمک‌زن
+   DevX Studio — بازطراحی حرفه‌ای ۲.۰
+   اصول: یک اکسنت آرام (فیروزه‌ای) + سطح‌های خنثی سرمه‌ای، تایپوگرافی
+   منظم، فاصله‌گذاری ۸px، خطوط مویی، بدون جلوه‌های پرت‌کننده.
    ═══════════════════════════════════════════════════════════════════ */
 :root{
-  --bg:#060609; --bg2:#0b0709; --panel:#100a0d; --panel2:#150d10;
-  --line:rgba(255,45,74,.22); --line-strong:rgba(255,45,74,.55);
-  --red:#ff2b4a; --red-deep:#8a1024; --red-dark:#3d0a14;
-  --teal:#3ee6cf; --teal-dim:rgba(62,230,207,.14);
-  --yellow:#ffd23f; --yellow-dim:rgba(255,210,63,.12);
-  --text:#ece7ea; --muted:#94868c; --faint:#5e5357;
-  --ok:#3ee68f; --err:#ff5566;
-  --mono:'JetBrains Mono',Consolas,monospace;
+  /* سطح‌ها */
+  --bg:#0a0c11; --bg-2:#0d1017;
+  --surface:#11141c; --surface-2:#161a25; --surface-3:#1c2130;
+  --line:rgba(148,163,184,.09); --line-2:rgba(148,163,184,.17);
+  /* اکسنت — نام‌ها برای سازگاری حفظ شده‌اند */
+  --teal:#2dd4bf; --teal-2:#99f6e4; --teal-soft:rgba(45,212,191,.11); --teal-line:rgba(45,212,191,.32);
+  --yellow:#f2b63d; --yellow-soft:rgba(242,182,61,.10); --yellow-line:rgba(242,182,61,.32);
+  --violet:#a78bfa; --violet-soft:rgba(167,139,250,.10);
+  /* متن */
+  --text:#e9ecf2; --muted:#9aa4b8; --faint:#606a80;
+  /* معنا */
+  --ok:#4ade80; --ok-soft:rgba(74,222,128,.11);
+  --err:#fb7185; --err-soft:rgba(251,113,133,.11);
+  --info:#93c5fd;
+  /* شکل */
+  --r-sm:8px; --r:12px; --r-lg:16px; --r-xl:20px;
+  --shadow:0 8px 32px rgba(2,4,10,.5);
+  --shadow-sm:0 2px 12px rgba(2,4,10,.35);
   --fa:'Vazirmatn',Tahoma,'Segoe UI',sans-serif;
-  --r:14px;
+  --mono:'JetBrains Mono','Consolas',monospace;
+  --rail-w:68px;
 }
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%}
+html{height:100%}
 body{
+  min-height:100vh;height:100dvh;overflow:hidden;
+  font-family:var(--fa);font-size:14px;color:var(--text);direction:rtl;
   background:
-    radial-gradient(1100px 500px at 85% -10%, rgba(255,43,74,.10), transparent 60%),
-    radial-gradient(900px 420px at 10% 110%, rgba(62,230,207,.06), transparent 60%),
+    radial-gradient(1200px 700px at 88% -12%, rgba(45,212,191,.055), transparent 55%),
+    radial-gradient(1000px 600px at -10% 108%, rgba(167,139,250,.05), transparent 55%),
     var(--bg);
-  color:var(--text); font-family:var(--fa); font-size:14px;
-  min-height:100vh; overflow-x:hidden;
 }
-::selection{background:rgba(255,43,74,.35)}
-::-webkit-scrollbar{width:9px;height:9px}
-::-webkit-scrollbar-track{background:var(--bg2)}
-::-webkit-scrollbar-thumb{background:var(--red-dark);border-radius:8px;border:1px solid var(--line)}
-::-webkit-scrollbar-thumb:hover{background:var(--red-deep)}
+::selection{background:rgba(45,212,191,.28)}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(148,163,184,.16);border-radius:8px}
+::-webkit-scrollbar-thumb:hover{background:rgba(148,163,184,.3)}
+button{font-family:var(--fa);cursor:pointer;border:none;background:none;color:inherit}
+button:disabled{cursor:not-allowed;opacity:.45}
+input,textarea,select{font-family:var(--fa)}
+a{color:var(--teal)}
+:focus-visible{outline:2px solid var(--teal-line);outline-offset:2px;border-radius:6px}
+svg{flex:0 0 auto}
 
-/* ── انیمیشن‌های پایه ─────────────────────────────────────────────── */
-@keyframes blink{0%,100%{opacity:1}50%{opacity:.18}}
-@keyframes softPulse{0%,100%{opacity:1;box-shadow:0 0 6px 1px currentColor}50%{opacity:.55;box-shadow:0 0 14px 3px currentColor}}
-@keyframes scan{0%{transform:translateX(-110%)}100%{transform:translateX(110%)}}
-@keyframes radar{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
-@keyframes breathe{0%,100%{box-shadow:0 0 18px rgba(255,43,74,.25), inset 0 0 22px rgba(255,43,74,.06)}50%{box-shadow:0 0 30px rgba(255,43,74,.5), inset 0 0 30px rgba(255,43,74,.12)}}
-@keyframes glitch{
-  0%,86%,100%{transform:none;clip-path:none;filter:none}
-  88%{transform:translate(1px,-1px);text-shadow:-2px 0 var(--teal),2px 0 var(--red)}
-  90%{transform:translate(-2px,1px);text-shadow:2px 0 var(--yellow),-2px 0 var(--red)}
-  92%{transform:translate(1px,0);text-shadow:-1px 0 var(--teal),1px 0 var(--red)}
-  94%{transform:none;text-shadow:none}
-}
-@keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-@keyframes shake{10%,90%{transform:translateX(-1px)}20%,80%{transform:translateX(2px)}30%,50%,70%{transform:translateX(-4px)}40%,60%{transform:translateX(4px)}}
+/* ── انیمیشن‌های آرام ──────────────────────────────────────────────── */
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}          /* چراغ وضعیت زنده */
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
 @keyframes spin{to{transform:rotate(360deg)}}
-@keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
+@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
 @keyframes caret{0%,100%{opacity:1}50%{opacity:0}}
-.blink{animation:blink 1.1s steps(1) infinite}
-.blink-fast{animation:blink .65s steps(1) infinite}
-@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+@keyframes ring{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 
-/* ── هدر ─────────────────────────────────────────────────────────── */
-header{
-  position:sticky;top:0;z-index:50;
-  background:linear-gradient(180deg,rgba(10,6,8,.96),rgba(10,6,8,.88));
-  border-bottom:1px solid var(--line);
-  backdrop-filter:blur(9px);
-  padding:12px 22px 10px;
-  display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+/* ═══ ریل ناوبری کنار ═════════════════════════════════════════════ */
+#rail{
+  position:fixed;inset-block:0;inset-inline-start:0;z-index:60;width:var(--rail-w);
+  display:flex;flex-direction:column;align-items:center;gap:4px;
+  padding:14px 0 12px;
+  background:rgba(13,16,23,.82);backdrop-filter:blur(14px);
+  border-inline-end:1px solid var(--line);
 }
-header::after{ /* خط اسکن رد‌شونده */
-  content:"";position:absolute;bottom:-1px;right:0;height:2px;width:180px;
-  background:linear-gradient(90deg,transparent,var(--red),transparent);
-  animation:scan 3.2s linear infinite;opacity:.85;
+.rail-logo{
+  width:42px;height:42px;border-radius:13px;margin-bottom:14px;position:relative;
+  display:grid;place-items:center;
+  background:linear-gradient(145deg,#134e4a,#0f172a);
+  border:1px solid var(--teal-line);
+  color:var(--teal-2);font-family:var(--mono);font-weight:700;font-size:14px;letter-spacing:.5px;
 }
-.logo{display:flex;align-items:center;gap:12px}
-.logo-mark{
-  width:38px;height:38px;border-radius:10px;position:relative;flex:0 0 auto;
-  background:linear-gradient(145deg,var(--red-deep),var(--red-dark));
-  border:1px solid var(--line-strong);
-  display:grid;place-items:center;font-family:var(--mono);font-weight:700;font-size:15px;color:var(--yellow);
-  text-shadow:0 0 8px rgba(255,210,63,.6);
+.rail-logo::after{
+  content:"";position:absolute;inset:-4px;border-radius:17px;
+  border:1px solid rgba(45,212,191,.18);
 }
-.logo-mark::before{content:"";position:absolute;inset:-5px;border-radius:14px;border:1px dashed rgba(255,43,74,.35);animation:radar 9s linear infinite}
-.logo h1{
-  font-size:24px;font-weight:800;letter-spacing:1px;font-family:var(--mono);direction:ltr;
-  color:var(--red); text-shadow:0 0 14px rgba(255,43,74,.55);
-  animation:glitch 6s infinite;
+.nav-btn{
+  position:relative;width:44px;height:44px;border-radius:12px;
+  display:grid;place-items:center;color:var(--faint);
+  transition:color .16s, background .16s;
 }
-.logo small{display:block;color:var(--muted);font-size:11px;font-weight:400;letter-spacing:0}
-.chips{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-inline-start:auto}
-.chip{
-  display:flex;align-items:center;gap:7px;padding:5px 11px;border-radius:999px;
-  background:var(--panel);border:1px solid var(--line);font-size:12px;color:var(--muted);
-  transition:border-color .2s, color .2s;
+.nav-btn:hover{color:var(--text);background:rgba(148,163,184,.07)}
+.nav-btn.active{color:var(--teal);background:var(--teal-soft)}
+.nav-btn.active::before{
+  content:"";position:absolute;inset-inline-end:-13px;top:12px;bottom:12px;width:3px;
+  border-radius:3px;background:var(--teal);
 }
-.chip b{color:var(--text);font-family:var(--mono);font-weight:700}
-.chip .led{width:8px;height:8px;border-radius:50%;background:var(--faint);flex:0 0 auto}
-.chip.on{border-color:rgba(62,230,207,.45);color:var(--text)}
-.chip.on .led{background:var(--teal);color:var(--teal);animation:softPulse 2s ease-in-out infinite}
-.chip.warn{border-color:rgba(255,210,63,.5);color:var(--yellow)}
-.chip.warn .led{background:var(--yellow);color:var(--yellow);animation:blink 1s steps(1) infinite}
-.chip.err{border-color:rgba(255,43,74,.6);color:var(--red)}
-.chip.err .led{background:var(--red);color:var(--red);animation:blink .7s steps(1) infinite}
-.clock{font-family:var(--mono);color:var(--yellow);font-size:13px;letter-spacing:2px;direction:ltr;text-shadow:0 0 10px rgba(255,210,63,.4)}
-.live{
-  font-family:var(--mono);font-size:11px;color:var(--red);border:1px solid var(--line-strong);
-  padding:4px 10px;border-radius:6px;letter-spacing:2px;direction:ltr;
-  background:rgba(255,43,74,.08);animation:blink 1.4s steps(1) infinite;
+.nav-btn .nav-badge{
+  position:absolute;top:5px;inset-inline-start:5px;min-width:16px;height:16px;padding:0 4px;
+  border-radius:8px;background:var(--surface-3);border:1px solid var(--line-2);
+  color:var(--muted);font-family:var(--mono);font-size:9px;font-weight:700;
+  display:none;place-items:center;line-height:1;
+}
+.nav-btn .nav-badge.show{display:grid}
+.rail-sep{width:26px;height:1px;background:var(--line);margin:8px 0}
+.rail-end{margin-top:auto;display:flex;flex-direction:column;align-items:center;gap:6px}
+.rail-status{
+  width:34px;height:34px;border-radius:10px;display:grid;place-items:center;
+  border:1px solid var(--line-2);background:var(--surface);color:var(--faint);
+}
+.rail-status.on{color:var(--ok);border-color:rgba(74,222,128,.3)}
+.rail-status .dot{width:8px;height:8px;border-radius:50%;background:currentColor}
+.rail-status.on .dot{animation:pulse 2.2s ease-in-out infinite}
+
+/* ═══ پوستهٔ اصلی ══════════════════════════════════════════════════ */
+#main{
+  height:100dvh;margin-inline-start:var(--rail-w);
+  display:flex;flex-direction:column;min-width:0;
+}
+#topbar{
+  flex:0 0 auto;height:58px;display:flex;align-items:center;gap:10px;
+  padding:0 20px;border-bottom:1px solid var(--line);
+  background:rgba(10,12,17,.75);backdrop-filter:blur(14px);z-index:40;
+}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.brand .brand-name{
+  font-family:var(--mono);font-weight:700;font-size:15px;letter-spacing:2px;direction:ltr;color:var(--text);
+}
+.brand .brand-name em{font-style:normal;color:var(--teal)}
+.brand .view-title{font-size:12.5px;color:var(--faint);white-space:nowrap}
+.topbar-actions{margin-inline-start:auto;display:flex;align-items:center;gap:8px}
+
+/* چیپ‌های وضعیت */
+.pill{
+  display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 12px;
+  border-radius:999px;border:1px solid var(--line-2);background:var(--surface);
+  font-size:12px;color:var(--muted);white-space:nowrap;transition:border-color .16s,color .16s;
+}
+.pill b{font-family:var(--mono);font-weight:600;font-size:11.5px;direction:ltr;color:var(--text);max-width:110px;overflow:hidden;text-overflow:ellipsis}
+.pill .led{width:7px;height:7px;border-radius:50%;background:var(--faint);flex:0 0 auto}
+.pill.on{border-color:rgba(74,222,128,.28);color:var(--text)}
+.pill.on .led{background:var(--ok);animation:pulse 2.4s ease-in-out infinite}
+.pill.warn{border-color:var(--yellow-line);color:var(--yellow)}
+.pill.warn .led{background:var(--yellow);animation:blink 1.6s ease-in-out infinite}
+.pill.err{border-color:rgba(251,113,133,.35);color:var(--err)}
+.pill.err .led{background:var(--err);animation:blink 1.2s ease-in-out infinite}
+.pill.click{cursor:pointer}
+.pill.click:hover{border-color:var(--teal-line);color:var(--text)}
+.icon-btn{
+  width:34px;height:34px;border-radius:10px;display:grid;place-items:center;
+  border:1px solid var(--line-2);background:var(--surface);color:var(--muted);
+  transition:color .16s,border-color .16s;position:relative;
+}
+.icon-btn:hover{color:var(--text);border-color:var(--line-2)}
+.icon-btn .badge{
+  position:absolute;top:-5px;inset-inline-end:-5px;min-width:16px;height:16px;padding:0 4px;
+  border-radius:8px;background:var(--err);color:#fff;font-family:var(--mono);font-size:9px;
+  display:none;place-items:center;
+}
+.icon-btn .badge.show{display:grid}
+.clock{font-family:var(--mono);font-size:12px;color:var(--faint);direction:ltr;letter-spacing:1px}
+
+/* ═══ نماها ════════════════════════════════════════════════════════ */
+#views{flex:1;min-height:0;position:relative}
+.view{position:absolute;inset:0;display:none;flex-direction:column;min-height:0}
+.view.active{display:flex;animation:fadeIn .22s ease-out}
+.view-scroll{flex:1;overflow-y:auto;padding:22px clamp(14px,3vw,34px) 40px;min-height:0}
+.view-inner{max-width:1060px;margin:0 auto;width:100%}
+.view-head{margin-bottom:18px}
+.view-head h2{font-size:17px;font-weight:700;display:flex;align-items:center;gap:9px}
+.view-head h2 .vh-ic{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;background:var(--teal-soft);color:var(--teal);border:1px solid var(--teal-line)}
+.view-head p{color:var(--muted);font-size:12.5px;margin-top:5px;line-height:1.8}
+
+/* ── چت ──────────────────────────────────────────────────────────── */
+#view-chat{padding:0}
+.chat-sub{
+  flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:10px 20px 0;
+  overflow-x:auto;scrollbar-width:none;
+}
+.chat-sub::-webkit-scrollbar{display:none}
+.chat-sub .lbl{font-family:var(--mono);font-size:9.5px;letter-spacing:1.5px;color:var(--faint);flex:0 0 auto;direction:ltr}
+.sess-tab{
+  flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 13px;
+  border-radius:999px;border:1px solid var(--line);background:var(--surface);
+  color:var(--muted);font-size:12px;transition:all .16s;white-space:nowrap;
+}
+.sess-tab:hover{border-color:var(--line-2);color:var(--text)}
+.sess-tab.active{border-color:var(--teal-line);background:var(--teal-soft);color:var(--teal)}
+.sess-tab .cnt{font-family:var(--mono);font-size:9.5px;color:var(--faint);direction:ltr}
+.sess-tab .cnt::before{content:"· "}
+#chatScroll{flex:1;overflow-y:auto;padding:18px clamp(14px,3vw,34px) 8px;min-height:0;scroll-behavior:smooth}
+.chat-col{max-width:860px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+
+/* هشدار مغز */
+.alert{
+  display:none;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:12px 16px;border-radius:var(--r);
+  background:linear-gradient(90deg,var(--err-soft),transparent 70%);
+  border:1px solid rgba(251,113,133,.3);
+}
+.alert.show{display:flex;animation:rise .25s ease-out}
+.alert .a-dot{width:9px;height:9px;border-radius:50%;background:var(--err);animation:blink 1.4s ease-in-out infinite;flex:0 0 auto}
+.alert .a-txt{flex:1;min-width:180px;font-size:12.5px;color:var(--text);line-height:1.8;overflow-wrap:anywhere;word-break:break-word}
+.alert .a-txt b{color:var(--err)}
+
+/* پیام‌ها */
+.msg{animation:rise .28s ease-out}
+.msg .m-head{display:flex;align-items:center;gap:8px;margin-bottom:7px;font-size:11px;color:var(--faint)}
+.msg .m-head .role{
+  font-family:var(--mono);font-size:9.5px;letter-spacing:1px;direction:ltr;
+  padding:2px 8px;border-radius:6px;border:1px solid var(--line-2);color:var(--muted);
+}
+.msg .m-head .who{color:var(--muted)}
+.msg .txt{line-height:2;white-space:pre-wrap;word-break:break-word;font-size:13.5px}
+.msg.user{
+  align-self:flex-start;max-width:min(85%,640px);
+  background:linear-gradient(180deg,var(--surface-2),var(--surface));
+  border:1px solid var(--line-2);border-radius:var(--r-lg) var(--r-lg) var(--r-lg) 4px;
+  padding:12px 16px;
+}
+.msg.user .m-head .role{color:var(--yellow);border-color:var(--yellow-line)}
+.msg.assistant{
+  align-self:stretch;
+  background:var(--surface);border:1px solid var(--line);
+  border-radius:var(--r-lg);padding:14px 18px;
+}
+.msg.assistant .m-head .role{color:var(--teal);border-color:var(--teal-line)}
+.msg.final{border-color:var(--teal-line);background:linear-gradient(180deg,var(--teal-soft),var(--surface) 46%)}
+.caret{display:inline-block;width:8px;height:15px;background:var(--teal);vertical-align:-2px;margin-inline-start:3px;border-radius:2px;animation:caret 1s steps(1) infinite}
+.code-chip{font-family:var(--mono);color:var(--yellow);background:var(--yellow-soft);padding:1px 6px;border-radius:5px;font-size:12px;direction:ltr;display:inline-block}
+
+/* کارت ابزار — فشرده و مرتب */
+.msg.tool{
+  align-self:stretch;border:1px solid var(--line);border-radius:var(--r);
+  background:var(--surface);overflow:hidden;
+}
+.msg.tool .t-head{
+  display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;
+  transition:background .16s;user-select:none;
+}
+.msg.tool .t-head:hover{background:rgba(148,163,184,.05)}
+.msg.tool .t-ic{
+  width:26px;height:26px;border-radius:8px;display:grid;place-items:center;flex:0 0 auto;
+  background:var(--surface-3);color:var(--teal);border:1px solid var(--line-2);
+}
+.msg.tool .t-ic.err{color:var(--err);background:var(--err-soft);border-color:rgba(251,113,133,.3)}
+.msg.tool .t-name{font-family:var(--mono);font-size:12.5px;direction:ltr;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.msg.tool .t-round{font-family:var(--mono);font-size:9.5px;color:var(--faint);border:1px solid var(--line-2);border-radius:5px;padding:1px 7px;direction:ltr;flex:0 0 auto}
+.msg.tool .t-status{margin-inline-start:auto;font-size:11px;display:flex;align-items:center;gap:6px;flex:0 0 auto;color:var(--muted)}
+.msg.tool .t-status.run{color:var(--yellow)}
+.msg.tool .t-status.ok{color:var(--ok)}
+.msg.tool .t-status.fail{color:var(--err)}
+.msg.tool .t-body{display:none;border-top:1px dashed var(--line-2);padding:10px 14px;background:rgba(2,4,10,.3)}
+.msg.tool.open .t-body{display:block}
+.msg.tool pre{
+  font-family:var(--mono);font-size:11px;direction:ltr;text-align:left;color:#b9c2d4;
+  background:rgba(2,4,10,.5);border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:9px 12px;overflow-x:auto;white-space:pre-wrap;word-break:break-word;line-height:1.75;
+}
+.spin{width:12px;height:12px;border-radius:50%;display:inline-block;border:2px solid var(--line-2);border-top-color:var(--teal);animation:spin .7s linear infinite}
+
+/* وضعیت خالی چت */
+.chat-empty{margin:auto;text-align:center;padding:40px 20px;max-width:560px}
+.orb{
+  width:84px;height:84px;border-radius:50%;margin:0 auto 20px;position:relative;
+  display:grid;place-items:center;
+  background:radial-gradient(circle at 35% 30%,var(--surface-3),var(--surface));
+  border:1px solid var(--line-2);
+}
+.orb::before{
+  content:"";position:absolute;inset:-7px;border-radius:50%;
+  background:conic-gradient(from 0deg,transparent 0 70%,var(--teal) 92%,transparent);
+  -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 2.5px),#000 0);
+  mask:radial-gradient(farthest-side,transparent calc(100% - 2.5px),#000 0);
+  animation:ring 5s linear infinite;opacity:.8;
+}
+.orb span{font-family:var(--mono);font-weight:700;font-size:18px;color:var(--teal-2);letter-spacing:1px}
+.chat-empty h3{font-size:16.5px;font-weight:700;margin-bottom:8px}
+.chat-empty p{color:var(--muted);font-size:13px;line-height:2;margin-bottom:20px}
+.chat-empty p b{color:var(--teal)}
+.sugg{display:flex;flex-direction:column;gap:8px}
+.sugg button{
+  text-align:start;padding:11px 16px;border-radius:var(--r);font-size:12.5px;color:var(--muted);
+  border:1px solid var(--line);background:var(--surface);transition:all .16s;line-height:1.8;
+}
+.sugg button:hover{color:var(--text);border-color:var(--teal-line);background:var(--teal-soft)}
+.sugg button i{color:var(--teal);margin-inline-end:8px;font-style:normal}
+
+/* نوار پایهٔ چت */
+.chat-foot{flex:0 0 auto;padding:6px clamp(14px,3vw,34px) 14px}
+.rounds-row{
+  max-width:860px;margin:0 auto 8px;display:flex;align-items:center;gap:10px;
+  font-family:var(--mono);font-size:10px;color:var(--faint);direction:ltr;
+}
+.rounds-row .r-track{flex:1;height:4px;border-radius:4px;background:rgba(148,163,184,.12);overflow:hidden}
+.rounds-row .r-track i{display:block;height:100%;width:0;border-radius:4px;background:linear-gradient(90deg,var(--teal),var(--yellow));transition:width .4s}
+.composer{
+  max-width:860px;margin:0 auto;display:flex;align-items:flex-end;gap:10px;
+  background:var(--surface);border:1px solid var(--line-2);border-radius:var(--r-lg);
+  padding:10px 12px;box-shadow:var(--shadow);transition:border-color .2s;
+}
+.composer:focus-within{border-color:var(--teal-line)}
+.composer textarea{
+  flex:1;background:transparent;border:none;outline:none;resize:none;color:var(--text);
+  font-size:14px;line-height:1.9;max-height:140px;min-height:26px;padding:2px 4px;
+}
+.composer textarea::placeholder{color:var(--faint)}
+.send-btn{
+  flex:0 0 auto;height:40px;padding:0 20px;border-radius:12px;
+  display:inline-flex;align-items:center;gap:8px;
+  background:linear-gradient(145deg,#0d9488,#0f766e);color:#fff;
+  font-size:13.5px;font-weight:600;transition:all .18s;
+  border:1px solid rgba(45,212,191,.35);
+}
+.send-btn:hover:not(:disabled){filter:brightness(1.15)}
+.send-btn .k{font-family:var(--mono);font-size:9.5px;opacity:.75;border:1px solid rgba(255,255,255,.28);border-radius:4px;padding:1px 6px;direction:ltr}
+.hint-row{max-width:860px;margin:6px auto 0;text-align:center;font-size:10.5px;color:var(--muted)}
+
+/* ── تایید انسانی ────────────────────────────────────────────────── */
+#approvals{
+  position:fixed;top:70px;inset-inline-start:50%;transform:translateX(50%);z-index:90;
+  display:flex;flex-direction:column;gap:10px;width:min(440px,92vw);
+}
+[dir="rtl"] #approvals{transform:translateX(50%)}
+.appr-card{
+  background:var(--surface-2);border:1px solid rgba(251,113,133,.4);border-radius:var(--r-lg);
+  padding:14px 16px;box-shadow:var(--shadow);animation:rise .25s ease-out;
+}
+.appr-card h4{color:var(--err);font-size:13px;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.appr-card pre{
+  font-family:var(--mono);font-size:10.5px;direction:ltr;text-align:left;color:#b9c2d4;
+  background:rgba(2,4,10,.5);border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:9px;max-height:110px;overflow:auto;white-space:pre-wrap;margin-bottom:10px;
 }
 
-/* ── نوار هشدار ──────────────────────────────────────────────────── */
-#alertBar{
-  display:none;align-items:center;gap:14px;flex-wrap:wrap;
-  margin:12px 22px 0;padding:12px 16px;border-radius:var(--r);
-  background:linear-gradient(90deg,rgba(255,43,74,.14),rgba(255,43,74,.05));
-  border:1px solid var(--line-strong); animation:breathe 2.4s ease-in-out infinite;
-}
-#alertBar.show{display:flex}
-#alertBar .dot{width:10px;height:10px;border-radius:50%;background:var(--red);animation:blink .8s steps(1) infinite;flex:0 0 auto}
-#alertBar b{color:var(--red)}
-#alertBar span{color:var(--text);font-size:13px}
-
-/* ── چیدمان اصلی ─────────────────────────────────────────────────── */
-main{display:grid;grid-template-columns:1fr 340px;gap:16px;padding:16px 22px;max-width:1560px;margin:0 auto}
-/* سایدبار چسبان با اسکرول داخلی — قبلاً محتوای پایین سایدبار (تب‌های داشبورد)
-   زیر نوار ورودیِ sticky گیر می‌کرد و در صفحه‌های کوتاه قابل‌کلیک نبود (باگ پاس ۴) */
-.side{display:flex;flex-direction:column;gap:16px;min-width:0;align-self:start;position:sticky;top:12px;max-height:calc(100vh - 24px);overflow-y:auto;padding-inline-end:6px}
-@media(max-width:1050px){main{grid-template-columns:1fr}.side{position:static;max-height:none;overflow:visible;padding-inline-end:0}}
-
-.panel{
-  background:linear-gradient(180deg,var(--panel),var(--panel2));
-  border:1px solid var(--line);border-radius:var(--r);overflow:hidden;
-  box-shadow:0 4px 24px rgba(0,0,0,.45);
-}
-.panel-h{
-  display:flex;align-items:center;gap:9px;padding:11px 14px;
-  border-bottom:1px solid var(--line);background:rgba(255,43,74,.05);
-}
-.panel-h h3{font-size:13px;font-weight:600;letter-spacing:.4px}
-.panel-h .cnt{
-  margin-inline-start:auto;font-family:var(--mono);font-size:11px;color:var(--teal);
-  border:1px solid rgba(62,230,207,.35);border-radius:6px;padding:2px 8px;direction:ltr;
-  background:var(--teal-dim);
-}
-.panel-h .icon{color:var(--yellow);font-size:14px;filter:drop-shadow(0 0 6px rgba(255,210,63,.5))}
-.panel-b{padding:12px 14px;max-height:330px;overflow-y:auto}
-.panel-b::-webkit-scrollbar-thumb{background:rgba(62,230,207,.25)}
-
-/* ── پنل حافظه ───────────────────────────────────────────────────── */
-.tabs{display:flex;gap:6px;padding:8px 12px 0;flex-wrap:wrap}
-.tab{
-  font-size:11px;padding:4px 10px;border-radius:7px;cursor:pointer;color:var(--muted);
-  border:1px solid transparent;background:transparent;transition:all .15s;
-}
-.tab.active{color:var(--yellow);border-color:rgba(255,210,63,.4);background:var(--yellow-dim)}
-.mem-item{
-  padding:8px 10px;border-radius:9px;margin-bottom:8px;font-size:12.5px;line-height:1.7;
-  background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.05);
-  border-inline-start:3px solid var(--red-deep);
-}
-.mem-item.lesson{border-inline-start-color:var(--yellow)}
-.mem-item.note{border-inline-start-color:var(--teal)}
-.mem-item .meta{color:var(--faint);font-size:10px;font-family:var(--mono);direction:ltr;display:block;margin-top:3px;text-align:left}
-
-/* ── پنل مهارت‌ها ────────────────────────────────────────────────── */
-.skill{
-  border:1px solid rgba(62,230,207,.22);border-radius:10px;padding:10px 12px;margin-bottom:9px;
-  background:linear-gradient(180deg,rgba(62,230,207,.06),transparent);
-}
-.skill h4{font-size:13px;color:var(--teal);font-family:var(--mono);direction:ltr;text-align:left;letter-spacing:.5px}
-.skill p{font-size:12px;color:var(--muted);margin:4px 0 6px;line-height:1.7}
-.skill .bars{display:flex;gap:10px;align-items:center}
-.bar{flex:1;height:5px;background:rgba(255,255,255,.06);border-radius:99px;overflow:hidden}
-.bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--teal),var(--yellow));transition:width .4s}
-.skill .num{font-family:var(--mono);font-size:10px;color:var(--faint);direction:ltr}
-
-/* ── پنل گیت‌هاب ─────────────────────────────────────────────────── */
-.gh-user{display:flex;gap:10px;align-items:center;margin-bottom:10px}
-.gh-avatar{width:38px;height:38px;border-radius:50%;border:2px solid var(--red);box-shadow:0 0 12px rgba(255,43,74,.4);background:var(--panel2)}
-.gh-user b{font-family:var(--mono);direction:ltr;display:block;color:var(--yellow)}
-.gh-user small{color:var(--muted);font-size:11px}
-.repo{
-  display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 10px;margin-bottom:7px;
-  border-radius:8px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.02);font-size:12px;
-}
-.repo b{font-family:var(--mono);direction:ltr;color:var(--text);font-size:11.5px}
-.repo .tag{font-size:10px;padding:2px 7px;border-radius:5px;font-family:var(--mono);direction:ltr}
-.tag.private{color:var(--red);border:1px solid rgba(255,43,74,.4);background:rgba(255,43,74,.08)}
-.tag.public{color:var(--teal);border:1px solid rgba(62,230,207,.35);background:var(--teal-dim)}
-
-/* ── پنل سیستم ───────────────────────────────────────────────────── */
-.sys{display:flex;flex-wrap:wrap;gap:7px}
-.sys .kv{
-  font-family:var(--mono);font-size:10.5px;direction:ltr;padding:4px 9px;border-radius:6px;
-  border:1px solid rgba(255,255,255,.08);color:var(--muted);background:rgba(255,255,255,.02);
-}
-.sys .kv b{color:var(--teal)}
-
-/* ── استریم تسک ──────────────────────────────────────────────────── */
-.stream{min-height:calc(100vh - 210px);display:flex;flex-direction:column;gap:12px}
-.card{
-  border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;
-  background:linear-gradient(180deg,var(--panel),var(--panel2));
-  animation:rise .3s ease-out;box-shadow:0 4px 20px rgba(0,0,0,.4);
-}
-.card.user{
-  border-color:rgba(255,210,63,.35);
-  background:linear-gradient(90deg,rgba(255,210,63,.08),transparent 40%);
-}
-.card.user .who{color:var(--yellow)}
-.card .who{
-  display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted);
-  margin-bottom:8px;letter-spacing:.5px;
-}
-.card .who .role{
-  font-family:var(--mono);padding:2px 9px;border-radius:5px;font-size:10px;direction:ltr;letter-spacing:1px;
-  border:1px solid var(--line);color:var(--red);background:rgba(255,43,74,.07);
-}
-.card .txt{line-height:1.9;white-space:pre-wrap;word-break:break-word;font-size:13.5px}
-
-.card.tool{
-  border-color:rgba(62,230,207,.3);
-  background:linear-gradient(90deg,rgba(62,230,207,.05),transparent 45%);
-  padding:10px 14px;
-}
-.card.tool .head{display:flex;align-items:center;gap:9px;cursor:pointer}
-.card.tool .icon{
-  width:26px;height:26px;border-radius:7px;display:grid;place-items:center;font-size:13px;flex:0 0 auto;
-  background:var(--teal-dim);border:1px solid rgba(62,230,207,.4);color:var(--teal);
-}
-.card.tool .icon.err{background:rgba(255,43,74,.1);border-color:rgba(255,43,74,.5);color:var(--red)}
-.card.tool .tname{font-family:var(--mono);color:var(--teal);direction:ltr;font-size:13px;letter-spacing:.3px}
-.card.tool.round-badge{margin-inline-start:auto}
-.card.tool .rno{font-family:var(--mono);font-size:10px;color:var(--faint);border:1px solid rgba(255,255,255,.1);border-radius:5px;padding:2px 7px;direction:ltr}
-.card.tool .status{margin-inline-start:auto;font-size:11px}
-.card.tool .status.run{color:var(--yellow);animation:blink .8s steps(1) infinite}
-.card.tool .status.ok{color:var(--ok)}
-.card.tool .status.fail{color:var(--err)}
-.card.tool .detail{display:none;margin-top:9px;border-top:1px dashed rgba(62,230,207,.25);padding-top:9px}
-.card.tool.open .detail{display:block}
-.card.tool pre{
-  font-family:var(--mono);font-size:11px;direction:ltr;text-align:left;color:#c9c2c6;
-  background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.06);border-radius:8px;
-  padding:9px 11px;overflow-x:auto;white-space:pre-wrap;word-break:break-word;line-height:1.7;
-}
-.spin{
-  width:13px;height:13px;border-radius:50%;flex:0 0 auto;display:inline-block;
-  border:2px solid rgba(255,210,63,.25);border-top-color:var(--yellow);
-  animation:spin .8s linear infinite;
-}
-
-.card.final{
-  border-color:rgba(62,230,207,.45);
-  background:linear-gradient(180deg,rgba(62,230,207,.07),transparent 60%);
-}
-.card.final .txt{color:#e6fbf6}
-.caret{
-  display:inline-block;width:9px;height:16px;background:var(--yellow);vertical-align:-2px;
-  margin-inline-start:3px;animation:caret 1s steps(1) infinite;
-  box-shadow:0 0 8px rgba(255,210,63,.7);
-}
-.toasts{
-  position:fixed;bottom:96px;inset-inline-start:22px;z-index:80;display:flex;flex-direction:column;gap:8px;max-width:340px;
+/* ── توست‌ها ──────────────────────────────────────────────────────── */
+#toasts{
+  position:fixed;bottom:104px;inset-inline-end:20px;z-index:95;
+  display:flex;flex-direction:column;gap:8px;width:min(340px,86vw);pointer-events:none;
 }
 .toast{
-  padding:10px 14px;border-radius:10px;font-size:12.5px;line-height:1.7;animation:rise .25s ease-out;
-  border:1px solid;box-shadow:0 6px 24px rgba(0,0,0,.5);
+  padding:11px 14px;border-radius:var(--r);font-size:12.5px;line-height:1.8;
+  border:1px solid var(--line-2);background:var(--surface-2);
+  box-shadow:var(--shadow-sm);animation:rise .22s ease-out;
+  border-inline-start:3px solid var(--info);color:var(--text);
 }
-.toast.ok{background:rgba(62,230,143,.1);border-color:rgba(62,230,143,.45);color:var(--ok)}
-.toast.err{background:rgba(255,43,74,.1);border-color:rgba(255,43,74,.5);color:var(--err)}
-.toast.info{background:rgba(255,210,63,.08);border-color:rgba(255,210,63,.4);color:var(--yellow)}
+.toast.ok{border-inline-start-color:var(--ok)}
+.toast.err{border-inline-start-color:var(--err)}
+.toast.info{border-inline-start-color:var(--yellow)}
 
-/* ── وضعیت خالی ──────────────────────────────────────────────────── */
-#empty{margin:auto;text-align:center;padding:60px 20px}
-.radar{
-  width:120px;height:120px;border-radius:50%;margin:0 auto 22px;position:relative;
-  border:1px solid var(--line);background:radial-gradient(circle,rgba(255,43,74,.06),transparent 70%);
+/* ═══ کامپوننت‌های عمومی نماها ════════════════════════════════════ */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden}
+.card-h{display:flex;align-items:center;gap:9px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.card-h h3{font-size:13.5px;font-weight:600}
+.card-h .c-ic{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;background:var(--teal-soft);color:var(--teal);flex:0 0 auto}
+.card-h .cnt{
+  margin-inline-start:auto;font-family:var(--mono);font-size:10.5px;color:var(--teal);
+  border:1px solid var(--teal-line);border-radius:6px;padding:2px 9px;direction:ltr;background:var(--teal-soft);
 }
-.radar::before,.radar::after{
-  content:"";position:absolute;border-radius:50%;border:1px solid rgba(255,43,74,.25);
+.card-b{padding:14px 16px}
+/* textarea داخل کارت‌های نما (نه مودال) — استایل تیرهٔ هماهنگ با تم */
+.card-b textarea{
+  width:100%;background:var(--surface-2);border:1px solid var(--line-2);border-radius:var(--r-sm);
+  color:var(--text);font-size:12.5px;padding:10px 12px;outline:none;line-height:1.9;resize:vertical;
+  transition:border-color .16s;
 }
-.radar::before{inset:22px}
-.radar::after{inset:44px;border-color:rgba(62,230,207,.35)}
-.radar .beam{
-  position:absolute;inset:0;border-radius:50%;overflow:hidden;
-  background:conic-gradient(from 0deg,rgba(62,230,207,.28),transparent 70deg,transparent 360deg);
-  animation:radar 3.4s linear infinite;
+.card-b textarea:focus{border-color:var(--teal-line)}
+.card-b textarea::placeholder{color:var(--faint)}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px}
+.stat{
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+  padding:12px 14px;display:flex;flex-direction:column;gap:4px;
 }
-.radar .core{position:absolute;top:50%;left:50%;width:8px;height:8px;margin:-4px;border-radius:50%;background:var(--red);box-shadow:0 0 12px var(--red);animation:softPulse 1.6s infinite;color:var(--red)}
-#empty h2{color:var(--text);font-size:17px;font-weight:600;margin-bottom:8px}
-#empty p{color:var(--muted);font-size:12.5px;margin-bottom:18px}
-#empty p b{color:var(--yellow);animation:blink 1.3s steps(1) infinite}
-.examples{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
-.ex{
-  font-size:11.5px;color:var(--muted);padding:6px 12px;border-radius:999px;cursor:pointer;
-  border:1px solid var(--line);background:var(--panel);transition:all .15s;
-}
-.ex:hover{color:var(--yellow);border-color:rgba(255,210,63,.5);background:var(--yellow-dim)}
+.stat .s-lbl{font-size:11px;color:var(--faint)}
+.stat .s-val{font-family:var(--mono);font-size:19px;font-weight:700;color:var(--text);direction:ltr;text-align:end}
+.stat .s-val small{font-size:11px;color:var(--faint);font-weight:400}
+.stat.accent .s-val{color:var(--teal)}
+.stat.warn .s-val{color:var(--yellow)}
 
-/* ── نوار ورودی ──────────────────────────────────────────────────── */
-.inputbar{
-  position:sticky;bottom:0;z-index:40;
-  background:linear-gradient(180deg,transparent,rgba(6,6,9,.92) 30%);
-  padding:14px 22px 18px;
+/* تب‌های داخلی */
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.tab{
+  font-size:12px;padding:6px 14px;border-radius:999px;cursor:pointer;color:var(--muted);
+  border:1px solid var(--line);background:var(--surface);transition:all .16s;
 }
-.ib-inner{
-  max-width:1560px;margin:0 auto;display:flex;gap:10px;align-items:flex-end;
-  background:linear-gradient(180deg,var(--panel),var(--panel2));
-  border:1px solid var(--line-strong);border-radius:16px;padding:10px 12px;
-  box-shadow:0 8px 40px rgba(255,43,74,.12), 0 4px 24px rgba(0,0,0,.5);
-  transition:box-shadow .25s;
-}
-.ib-inner:focus-within{box-shadow:0 8px 44px rgba(255,43,74,.3), 0 4px 24px rgba(0,0,0,.5);animation:breathe 3s ease-in-out infinite}
-.ib-inner textarea{
-  flex:1;background:transparent;border:none;outline:none;resize:none;color:var(--text);
-  font-family:var(--fa);font-size:14px;line-height:1.8;max-height:130px;min-height:24px;padding:2px 4px;
-}
-.ib-inner textarea::placeholder{color:var(--faint)}
-#sendBtn{
-  flex:0 0 auto;display:flex;align-items:center;gap:8px;cursor:pointer;
-  background:linear-gradient(145deg,var(--red-deep),var(--red-dark));color:#fff;
-  border:1px solid var(--line-strong);border-radius:11px;padding:9px 20px;font-family:var(--fa);font-size:13.5px;font-weight:600;
-  transition:all .2s;box-shadow:0 0 16px rgba(255,43,74,.35);
-}
-#sendBtn:hover:not(:disabled){box-shadow:0 0 26px rgba(255,43,74,.6);transform:translateY(-1px)}
-#sendBtn:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
-#sendBtn .k{font-family:var(--mono);font-size:10px;opacity:.7;border:1px solid rgba(255,255,255,.25);border-radius:4px;padding:1px 5px;direction:ltr}
-.rounds{max-width:1560px;margin:8px auto 0;display:flex;gap:6px;align-items:center;font-family:var(--mono);font-size:10.5px;color:var(--faint);direction:ltr}
-.rounds .dot{width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,.08)}
-.rounds .dot.done{background:var(--teal);box-shadow:0 0 6px rgba(62,230,207,.6)}
-.rounds .dot.err{background:var(--red)}
-.rounds .dot.cur{background:var(--yellow);animation:blink .7s steps(1) infinite}
+.tab:hover{color:var(--text);border-color:var(--line-2)}
+.tab.active{color:var(--teal);border-color:var(--teal-line);background:var(--teal-soft)}
 
-/* ── مودال توکن ──────────────────────────────────────────────────── */
+/* آیتم‌های لیستی */
+.list-item{
+  padding:10px 12px;border-radius:var(--r);margin-bottom:8px;font-size:12.5px;line-height:1.8;
+  background:var(--surface-2);border:1px solid var(--line);border-inline-start:3px solid var(--line-2);
+  animation:rise .2s ease-out;
+}
+.list-item .li-meta{color:var(--faint);font-size:10px;font-family:var(--mono);direction:ltr;display:flex;gap:8px;margin-top:4px;flex-wrap:wrap}
+.list-item.fact{border-inline-start-color:var(--teal)}
+.list-item.lesson{border-inline-start-color:var(--yellow)}
+.list-item.note{border-inline-start-color:var(--violet)}
+.list-item.task-ok{border-inline-start-color:var(--ok)}
+.list-item.task-fail{border-inline-start-color:var(--err)}
+.empty-note{
+  padding:22px 16px;text-align:center;color:var(--faint);font-size:12.5px;line-height:2;
+  border:1px dashed var(--line-2);border-radius:var(--r);
+}
+
+/* فرم‌های کوچک */
+.mini-form{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.mini-form input,.mini-form select{
+  background:var(--surface-2);border:1px solid var(--line-2);border-radius:var(--r-sm);
+  color:var(--text);font-size:12.5px;padding:8px 12px;outline:none;flex:1;min-width:120px;
+  transition:border-color .16s;
+}
+.mini-form input:focus{border-color:var(--teal-line)}
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  padding:9px 18px;border-radius:var(--r-sm);font-size:13px;font-weight:600;
+  border:1px solid var(--teal-line);color:var(--teal-2);background:var(--teal-soft);
+  transition:all .17s;white-space:nowrap;
+}
+.btn:hover:not(:disabled){background:rgba(45,212,191,.18)}
+.btn.solid{background:linear-gradient(145deg,#0d9488,#0f766e);color:#fff;border-color:transparent}
+.btn.solid:hover:not(:disabled){filter:brightness(1.15)}
+.btn.danger{color:var(--err);border-color:rgba(251,113,133,.35);background:var(--err-soft)}
+.btn.danger:hover:not(:disabled){background:rgba(251,113,133,.16)}
+.btn.ghost{background:transparent;border-color:var(--line-2);color:var(--muted)}
+.btn.ghost:hover:not(:disabled){color:var(--text);border-color:var(--line-2);background:rgba(148,163,184,.06)}
+.btn.sm{padding:6px 12px;font-size:11.5px;border-radius:8px}
+.x-btn{
+  flex:0 0 auto;border:1px solid rgba(251,113,133,.3);color:var(--err);background:transparent;
+  border-radius:7px;padding:4px 10px;font-size:10.5px;transition:all .15s;
+}
+.x-btn:hover{background:var(--err-soft)}
+
+/* پروژه‌ها */
+.proj-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+.proj-card{
+  position:relative;padding:16px;border-radius:var(--r-lg);cursor:pointer;
+  background:var(--surface);border:1px solid var(--line);transition:all .18s;
+  display:flex;flex-direction:column;gap:8px;min-height:110px;
+}
+.proj-card:hover{border-color:var(--teal-line);transform:translateY(-2px);box-shadow:var(--shadow-sm)}
+.proj-card.active{border-color:var(--teal);background:linear-gradient(180deg,var(--teal-soft),var(--surface) 70%)}
+.proj-card .p-id{font-family:var(--mono);font-size:10.5px;color:var(--teal);border:1px solid var(--teal-line);border-radius:6px;padding:1px 8px;direction:ltr;align-self:flex-start}
+.proj-card .p-name{font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.proj-card .p-stats{font-family:var(--mono);font-size:10px;color:var(--faint);direction:ltr;margin-top:auto}
+.proj-card .p-del{position:absolute;top:10px;inset-inline-end:10px;opacity:0;transition:opacity .15s}
+.proj-card:hover .p-del{opacity:1}
+.proj-card.new{
+  border-style:dashed;border-color:var(--line-2);color:var(--faint);
+  align-items:center;justify-content:center;gap:6px;background:transparent;
+}
+.proj-card.new:hover{color:var(--teal);border-color:var(--teal-line)}
+.active-ring{position:absolute;top:12px;inset-inline-start:12px;width:8px;height:8px;border-radius:50%;background:var(--teal);box-shadow:0 0 0 3px var(--teal-soft)}
+
+/* مهارت‌ها */
+.skill-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+.skill-card{padding:14px 16px;border-radius:var(--r-lg);background:var(--surface);border:1px solid var(--line);display:flex;flex-direction:column;gap:8px}
+.skill-card h4{font-family:var(--mono);font-size:13px;direction:ltr;text-align:start;color:var(--teal-2);word-break:break-all}
+.skill-card p{font-size:12px;color:var(--muted);line-height:1.8;flex:1}
+.skill-card .s-meta{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:10px;color:var(--faint);direction:ltr}
+.bar{flex:1;height:5px;background:rgba(148,163,184,.12);border-radius:99px;overflow:hidden}
+.bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--teal),var(--yellow));transition:width .5s}
+
+/* مصرف — نمودار SVG */
+.chart-wrap{padding:16px;overflow-x:auto}
+.chart-svg{width:100%;min-width:520px;height:190px;display:block}
+.chart-svg .g-bar{fill:url(#gTeal);rx:3}
+.chart-svg .g-label{font-family:var(--mono);font-size:9px;fill:var(--faint)}
+.chart-grid-line{stroke:rgba(148,163,184,.1);stroke-dasharray:3 5}
+
+/* خط زمانی */
+.tl{position:relative;padding-inline-start:20px}
+.tl::before{content:"";position:absolute;inset-block:6px;inset-inline-start:5px;width:2px;background:linear-gradient(180deg,var(--teal-line),var(--line))}
+.tl-item{position:relative;padding:8px 0 14px;font-size:12.5px}
+.tl-item::before{
+  content:"";position:absolute;inset-inline-start:-19px;top:13px;width:9px;height:9px;border-radius:50%;
+  background:var(--surface-3);border:2px solid var(--teal);
+}
+.tl-item .tl-txt{color:var(--text);line-height:1.8;overflow-wrap:anywhere;word-break:break-word}
+.tl-item .tl-meta{font-family:var(--mono);font-size:9.5px;color:var(--faint);direction:ltr;display:flex;gap:10px;margin-top:3px}
+
+/* گیت‌هاب */
+.gh-user{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.gh-avatar{width:52px;height:52px;border-radius:50%;background:var(--surface-3);border:2px solid var(--teal-line);object-fit:cover}
+.gh-user b{font-family:var(--mono);direction:ltr;display:block;font-size:15px;color:var(--teal-2)}
+.gh-user small{color:var(--muted);font-size:11.5px}
+.rate-row{display:flex;align-items:center;gap:12px;font-family:var(--mono);font-size:11px;color:var(--muted);direction:ltr}
+.repo-row{
+  display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 14px;
+  border-radius:var(--r);border:1px solid var(--line);background:var(--surface-2);font-size:12.5px;
+}
+.repo-row b{font-family:var(--mono);direction:ltr;color:var(--text);font-size:12px;word-break:break-all}
+.tag{font-size:9.5px;padding:2px 8px;border-radius:6px;font-family:var(--mono);direction:ltr;flex:0 0 auto}
+.tag.private{color:var(--yellow);border:1px solid var(--yellow-line);background:var(--yellow-soft)}
+.tag.public{color:var(--teal);border:1px solid var(--teal-line);background:var(--teal-soft)}
+
+/* تنظیمات */
+.set-section{margin-bottom:16px}
+.set-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:13px 16px;border-top:1px solid var(--line)}
+.set-row:first-child{border-top:none}
+.set-row .sr-txt{flex:1;min-width:200px}
+.set-row .sr-txt b{display:block;font-size:13px}
+.set-row .sr-txt small{color:var(--muted);font-size:11.5px;line-height:1.7;overflow-wrap:anywhere;word-break:break-word;display:block}
+.kv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.kv{font-family:var(--mono);font-size:10.5px;direction:ltr;padding:8px 11px;border-radius:var(--r-sm);border:1px solid var(--line);color:var(--faint);background:var(--surface-2)}
+.kv b{color:var(--teal);display:block;margin-top:2px;word-break:break-all}
+.switch{position:relative;width:44px;height:24px;border-radius:99px;background:var(--surface-3);border:1px solid var(--line-2);transition:all .2s;flex:0 0 auto}
+.switch::after{content:"";position:absolute;top:2px;inset-inline-start:2px;width:18px;height:18px;border-radius:50%;background:var(--muted);transition:all .2s}
+.switch.on{background:rgba(251,113,133,.2);border-color:rgba(251,113,133,.5)}
+.switch.on::after{background:var(--err);transform:translateX(-20px)}
+
+/* ممیزی */
+.audit-badge-ok{color:var(--ok);font-weight:700}
+.audit-badge-bad{color:var(--err);font-weight:700;animation:blink 1.2s ease-in-out infinite}
+
+/* ═══ مودال‌ها ════════════════════════════════════════════════════ */
 .overlay{
-  position:fixed;inset:0;z-index:100;display:none;place-items:center;
-  background:rgba(3,2,4,.78);backdrop-filter:blur(6px);
+  position:fixed;inset:0;z-index:100;display:none;place-items:center;padding:16px;
+  background:rgba(4,6,10,.72);backdrop-filter:blur(8px);
 }
-.overlay.show{display:grid}
+.overlay.show{display:grid;animation:fadeIn .18s ease-out}
 .modal{
-  width:min(480px,92vw);border-radius:18px;padding:26px 26px 22px;position:relative;
-  background:linear-gradient(180deg,#150d10,#0c0809);
-  border:1px solid var(--line-strong);animation:breathe 2.6s ease-in-out infinite;
+  width:min(500px,94vw);max-height:88vh;overflow-y:auto;border-radius:var(--r-xl);
+  padding:24px;position:relative;background:var(--surface);
+  border:1px solid var(--line-2);box-shadow:var(--shadow);animation:rise .22s ease-out;
 }
-.modal h2{color:var(--red);font-size:18px;margin-bottom:4px;text-shadow:0 0 12px rgba(255,43,74,.5)}
-.modal .sub{color:var(--muted);font-size:12.5px;line-height:1.9;margin-bottom:16px}
+.modal h2{font-size:16.5px;font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:9px}
+.modal h2 .m-ic{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:var(--teal-soft);color:var(--teal);border:1px solid var(--teal-line)}
+.modal .sub{color:var(--muted);font-size:12.5px;line-height:2;margin-bottom:16px;overflow-wrap:anywhere;word-break:break-word}
 .modal .sub a{color:var(--teal);text-decoration:none}
 .modal .sub a:hover{text-decoration:underline}
-.modal input{
-  width:100%;padding:11px 14px;border-radius:10px;outline:none;font-family:var(--mono);font-size:13px;direction:ltr;
-  background:rgba(0,0,0,.4);border:1px solid var(--line);color:var(--yellow);letter-spacing:1px;transition:border-color .2s;
+.modal input[type=text],.modal input[type=password]{
+  width:100%;padding:11px 14px;border-radius:var(--r-sm);outline:none;
+  font-family:var(--mono);font-size:13px;direction:ltr;
+  background:var(--surface-2);border:1px solid var(--line-2);color:var(--text);transition:border-color .16s;
 }
-.modal input:focus{border-color:var(--red)}
+.modal input:focus{border-color:var(--teal-line)}
+.modal textarea{
+  width:100%;background:var(--surface-2);border:1px solid var(--line-2);border-radius:var(--r-sm);
+  color:var(--text);font-size:12.5px;padding:10px 12px;outline:none;line-height:1.9;resize:vertical;
+}
+.modal textarea:focus{border-color:var(--teal-line)}
 .modal .row{display:flex;gap:10px;margin-top:14px}
-.btn{
-  flex:1;padding:10px;border-radius:10px;cursor:pointer;font-family:var(--fa);font-size:13.5px;font-weight:600;transition:all .2s;
-  border:1px solid var(--line-strong);background:linear-gradient(145deg,var(--red-deep),var(--red-dark));color:#fff;
-}
-.btn:hover:not(:disabled){box-shadow:0 0 20px rgba(255,43,74,.5)}
-.btn.ghost{background:transparent;border-color:rgba(255,255,255,.15);color:var(--muted)}
-.btn.ghost:hover{color:var(--text);box-shadow:none;border-color:rgba(255,255,255,.3)}
+.modal .row .btn{flex:1}
 .modal .err{color:var(--err);font-size:12px;margin-top:10px;line-height:1.8;min-height:18px}
 .modal.shake{animation:shake .45s}
+@keyframes shake{10%,90%{transform:translateX(-1px)}20%,80%{transform:translateX(2px)}30%,50%,70%{transform:translateX(-3px)}40%,60%{transform:translateX(3px)}}
 .modal .secure{
-  display:flex;align-items:center;gap:8px;margin-top:14px;font-size:11px;color:var(--faint);
+  display:flex;align-items:center;gap:8px;margin-top:14px;font-size:11px;color:var(--faint);line-height:1.7;
 }
-.modal .secure .led{width:7px;height:7px;border-radius:50%;background:var(--ok);color:var(--ok);animation:softPulse 2.4s infinite}
+.modal .secure .led{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:0 0 auto}
+.gh-code{
+  text-align:center;padding:14px;border-radius:var(--r);margin:12px 0;
+  background:var(--surface-2);border:1px dashed var(--teal-line);
+}
+.gh-code .code{
+  font-family:var(--mono);font-size:1.9rem;letter-spacing:.32em;font-weight:700;
+  color:var(--teal-2);direction:ltr;margin:6px 0;
+}
+.palette-list{max-height:340px;overflow-y:auto;margin-top:12px}
 
-/* ── پروژه‌ها ─────────────────────────────────────────────────────── */
-.chip.project{
-  cursor:pointer;border-color:rgba(255,210,63,.45);color:var(--yellow);
-  background:var(--yellow-dim);
+/* ═══ ناوبری موبایل ═══════════════════════════════════════════════ */
+#mobileNav{
+  display:none;position:fixed;bottom:0;inset-inline:0;z-index:70;
+  background:rgba(13,16,23,.92);backdrop-filter:blur(14px);border-top:1px solid var(--line);
+  padding:6px 8px calc(6px + env(safe-area-inset-bottom));
+  overflow-x:auto;scrollbar-width:none;
 }
-.chip.project .led{background:var(--yellow);color:var(--yellow);animation:softPulse 2.2s infinite}
-.chip.project b{color:var(--text)}
-.newchat-btn{
-  display:flex;align-items:center;gap:7px;cursor:pointer;flex:0 0 auto;
-  border:1px solid var(--line-strong);border-radius:10px;padding:7px 14px;
-  background:linear-gradient(145deg,var(--red-deep),var(--red-dark));color:#fff;
-  font-family:var(--fa);font-size:12.5px;font-weight:600;transition:all .2s;
-  box-shadow:0 0 14px rgba(255,43,74,.3);
+#mobileNav::-webkit-scrollbar{display:none}
+#mobileNav .m-row{display:flex;gap:4px;min-width:max-content;margin:0 auto}
+.m-nav{
+  display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 12px;border-radius:12px;
+  color:var(--faint);font-size:9.5px;position:relative;transition:color .16s;
 }
-.newchat-btn:hover{box-shadow:0 0 24px rgba(255,43,74,.6);transform:translateY(-1px)}
-.proj-item{
-  display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:8px;
-  border-radius:10px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.02);
-  cursor:pointer;transition:all .15s;
+.m-nav.active{color:var(--teal)}
+.m-nav .nav-badge{
+  position:absolute;top:2px;inset-inline-end:6px;min-width:14px;height:14px;padding:0 3px;
+  border-radius:7px;background:var(--surface-3);border:1px solid var(--line-2);
+  color:var(--muted);font-family:var(--mono);font-size:8.5px;display:none;place-items:center;
 }
-.proj-item:hover{border-color:rgba(62,230,207,.4);background:var(--teal-dim)}
-.proj-item.active{border-color:rgba(255,210,63,.55);background:var(--yellow-dim)}
-.proj-item .pid{
-  font-family:var(--mono);font-size:11px;color:var(--yellow);flex:0 0 auto;
-  border:1px solid rgba(255,210,63,.4);border-radius:6px;padding:2px 8px;direction:ltr;
-}
-.proj-item.active .pid{animation:blink 1.6s steps(1) infinite}
-.proj-item .pname{flex:1;font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.proj-item .pstats{font-family:var(--mono);font-size:10px;color:var(--faint);direction:ltr;flex:0 0 auto}
-.proj-item .del{
-  flex:0 0 auto;border:1px solid rgba(255,43,74,.4);color:var(--red);background:rgba(255,43,74,.07);
-  border-radius:7px;padding:3px 9px;font-size:11px;cursor:pointer;font-family:var(--fa);transition:all .15s;
-}
-.proj-item .del:hover{background:rgba(255,43,74,.2);box-shadow:0 0 10px rgba(255,43,74,.4)}
-.proj-list{max-height:250px;overflow-y:auto;margin-top:8px;padding-inline-end:4px}
-.proj-badge{
-  font-family:var(--mono);font-size:10px;direction:ltr;color:var(--yellow);
-  border:1px solid rgba(255,210,63,.4);background:var(--yellow-dim);
-  border-radius:5px;padding:2px 8px;margin-inline-start:auto;
-}
-.renum-hint{
-  font-size:11px;color:var(--teal);margin-top:8px;line-height:1.8;
-  border-top:1px dashed rgba(62,230,207,.25);padding-top:8px;
-}
+.m-nav .nav-badge.show{display:grid}
 
-/* ── v4: سشن‌ها / اعلان‌ها / تایید / داشبورد / Cmd+K ─────────────── */
-.sessbar{
-  display:flex;gap:6px;align-items:center;padding:8px 22px 0;max-width:1560px;margin:0 auto;
-  flex-wrap:wrap;
+@media (max-width:860px){
+  #rail{display:none}
+  #main{margin-inline-start:0}
+  #mobileNav{display:block}
+  #topbar{padding:0 12px;height:54px}
+  .brand .view-title{display:none}
+  #chipProject,#chipTools{display:none} /* پروژه/ابزار از ناوبری پایین در دسترس‌اند */
+  .clock{display:none}
+  .pill{height:30px;padding:0 10px;font-size:11px}
+  .pill b{max-width:64px}
+  #approvals{top:60px}
+  #views{padding-bottom:64px}
+  .view-scroll{padding:16px 14px 84px}
+  #chatScroll{padding:14px 14px 8px}
+  .chat-col{padding-bottom:20px}
+  /* هیروی فشرده در موبایل: هر ۳ پیشنهاد بدون اسکرول دیده شوند */
+  .chat-empty{padding:14px 10px}
+  .orb{width:60px;height:60px;margin-bottom:12px}
+  .orb span{font-size:14px}
+  .chat-empty h3{font-size:15px}
+  .chat-empty p{margin-bottom:12px;font-size:12px}
+  .sugg{gap:6px}
+  .sugg button{padding:8px 13px;font-size:12px}
+  .chat-foot{padding:6px 14px calc(78px + env(safe-area-inset-bottom))}
+  #toasts{bottom:170px;inset-inline-end:12px}
+  .msg.user{max-width:92%}
+  .proj-grid{grid-template-columns:1fr 1fr}
+  .modal{padding:18px}
+  .gh-code .code{font-size:1.5rem;letter-spacing:.22em}
 }
-.sess-tab{
-  font-family:var(--fa);font-size:11.5px;color:var(--muted);cursor:pointer;
-  border:1px solid var(--line);border-radius:999px;padding:5px 14px;background:var(--panel);
-  transition:all .15s;display:flex;gap:6px;align-items:center;
+@media (max-width:420px){
+  .proj-grid{grid-template-columns:1fr}
+  .brand .brand-name{display:none}
 }
-.sess-tab.active{color:var(--yellow);border-color:rgba(255,210,63,.5);background:var(--yellow-dim)}
-.sess-tab:hover{border-color:rgba(62,230,207,.4)}
-.sess-tab .cnt{font-family:var(--mono);font-size:9px;color:var(--faint);direction:ltr}
-.bell-btn{
-  position:relative;cursor:pointer;flex:0 0 auto;width:34px;height:34px;border-radius:9px;
-  display:flex;align-items:center;justify-content:center;font-size:15px;
-  border:1px solid var(--line-strong);background:var(--panel);transition:all .15s;
-}
-.bell-btn:hover{border-color:rgba(255,210,63,.5)}
-.bell-btn .badge{
-  position:absolute;top:-6px;inset-inline-end:-6px;min-width:16px;height:16px;border-radius:8px;
-  background:var(--red);color:#fff;font-size:9px;font-family:var(--mono);
-  display:flex;align-items:center;justify-content:center;padding:0 4px;animation:softPulse 1.8s infinite;
-}
-.cmdk-btn{
-  cursor:pointer;flex:0 0 auto;font-family:var(--mono);font-size:10px;direction:ltr;
-  border:1px solid var(--line-strong);border-radius:8px;padding:6px 10px;color:var(--faint);
-  background:var(--panel);transition:all .15s;
-}
-.cmdk-btn:hover{color:var(--yellow);border-color:rgba(255,210,63,.5)}
-.approvals{
-  position:fixed;top:70px;inset-inline-end:22px;z-index:90;display:flex;flex-direction:column;gap:10px;max-width:360px;
-}
-.appr-card{
-  background:linear-gradient(180deg,rgba(255,43,74,.12),var(--panel2));border:1px solid rgba(255,43,74,.5);
-  border-radius:14px;padding:14px;box-shadow:0 10px 40px rgba(0,0,0,.6);animation:rise .25s ease-out;
-}
-.appr-card h4{color:var(--red);font-size:13px;margin-bottom:6px}
-.appr-card pre{
-  font-family:var(--mono);font-size:10px;direction:ltr;text-align:left;color:#c9c2c6;background:rgba(0,0,0,.35);
-  border-radius:8px;padding:8px;max-height:110px;overflow:auto;white-space:pre-wrap;margin:8px 0;
-}
-.appr-card .row{display:flex;gap:8px}
-.dash-tabs{display:flex;gap:4px;flex-wrap:wrap}
-.dash-tab{
-  font-size:10.5px;color:var(--muted);cursor:pointer;padding:4px 10px;border-radius:999px;
-  border:1px solid var(--line);transition:all .15s;
-}
-.dash-tab.active{color:var(--teal);border-color:rgba(62,230,207,.45);background:rgba(62,230,207,.06)}
-.tl-item{display:flex;gap:8px;padding:6px 0;border-bottom:1px dashed rgba(255,255,255,.05);font-size:11.5px;align-items:baseline}
-.tl-item .tk{font-family:var(--mono);font-size:9px;color:var(--teal);direction:ltr;flex:0 0 auto}
-.tl-item .tt{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tl-item .td{font-family:var(--mono);font-size:9px;color:var(--faint);direction:ltr;flex:0 0 auto;margin-inline-start:auto}
-.usage-bar{height:6px;border-radius:3px;background:rgba(255,255,255,.06);overflow:hidden;margin-top:4px}
-.usage-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--teal),var(--yellow))}
-.verify-ok{color:var(--ok)} .verify-bad{color:var(--err);animation:blink 1s steps(1) infinite}
-.palette{max-height:340px;overflow-y:auto;margin-top:10px}
-.palette .mem-item{cursor:pointer}
-.palette .mem-item:hover{border-color:rgba(62,230,207,.45)}
-.mini-form{display:flex;gap:6px;margin:8px 0;flex-wrap:wrap}
-.mini-form input,.mini-form select{
-  background:rgba(0,0,0,.3);border:1px solid var(--line);border-radius:8px;color:var(--text);
-  font-family:var(--fa);font-size:11.5px;padding:6px 10px;outline:none;flex:1;min-width:0;
-}
-.mini-form input:focus{border-color:rgba(255,210,63,.45)}
-.mini-form .btn{padding:6px 12px;font-size:11px}
-.line-item{display:flex;gap:8px;align-items:center;padding:6px 8px;border-radius:8px;font-size:11.5px;border:1px solid transparent}
-.line-item:hover{background:rgba(255,255,255,.03)}
-.line-item .li-del{margin-inline-start:auto;border:1px solid rgba(255,43,74,.4);color:var(--red);
-  background:rgba(255,43,74,.06);border-radius:6px;padding:2px 8px;cursor:pointer;font-size:10px}
-.badge2{font-family:var(--mono);font-size:9px;direction:ltr;border:1px solid var(--line);
-  border-radius:5px;padding:1px 6px;color:var(--faint)}
-
-.mtop{margin-top:12px;font-size:12px;color:var(--muted);line-height:1.8}
-.mtop b{color:var(--teal)}
 </style>
 </head>
 <body>
+<!-- ═══ آیکون‌های SVG (لوسید-استایل، بدون وابستگی) ═══ -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="gTeal" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#0d9488"/><stop offset="1" stop-color="#2dd4bf"/>
+    </linearGradient>
+    <symbol id="i-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></symbol>
+    <symbol id="i-brain" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 15h3M1 9h3M1 15h3"/></symbol>
+    <symbol id="i-zap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M8 16v-5M12 16V8M16 16v-3"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-github" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.1.79-.25.79-.55v-2.17c-3.2.7-3.87-1.37-3.87-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.75 2.69 1.25 3.34.95.1-.74.4-1.25.72-1.54-2.55-.29-5.23-1.28-5.23-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.79 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.12 3.05.74.81 1.18 1.83 1.18 3.09 0 4.41-2.69 5.38-5.25 5.66.41.36.77 1.05.77 2.13v3.16c0 .3.2.66.8.55A11.5 11.5 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5z"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a13.5 13.5 0 0 1 0 18M12 3a13.5 13.5 0 0 0 0 18"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-2 2m-7.6 7.6a5.5 5.5 0 1 1-7.8 7.8 5.5 5.5 0 0 1 7.8-7.8zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3-3.5 3.5z"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></symbol>
+    <symbol id="i-package" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.3 7 12 12l8.7-5M12 22V12"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></symbol>
+  </defs>
+</svg>
 
-<!-- ═══════════ هدر ═══════════ -->
-<header>
-  <div class="logo">
-    <div class="logo-mark">DX</div>
-    <div>
-      <h1>DEVX</h1>
-      <small>ایجنت خودمختار DeepSeek × GitHub — حافظه‌دار • مهارت‌آموز</small>
-    </div>
+<!-- ═══ ریل ناوبری ═══ -->
+<nav id="rail" aria-label="ناوبری اصلی">
+  <div class="rail-logo" title="DevX Studio">DX</div>
+  <button class="nav-btn active" data-view="chat" title="چت" onclick="switchView('chat')"><svg width="20" height="20"><use href="#i-chat"/></svg></button>
+  <button class="nav-btn" data-view="projects" title="پروژه‌ها" onclick="switchView('projects')"><svg width="20" height="20"><use href="#i-folder"/></svg><span class="nav-badge" id="bProj"></span></button>
+  <button class="nav-btn" data-view="memory" title="حافظه" onclick="switchView('memory')"><svg width="20" height="20"><use href="#i-brain"/></svg><span class="nav-badge" id="bMem"></span></button>
+  <button class="nav-btn" data-view="skills" title="مهارت‌ها" onclick="switchView('skills')"><svg width="20" height="20"><use href="#i-zap"/></svg><span class="nav-badge" id="bSkill"></span></button>
+  <button class="nav-btn" data-view="auto" title="اتوماسیون" onclick="switchView('auto')"><svg width="20" height="20"><use href="#i-activity"/></svg><span class="nav-badge" id="bAuto"></span></button>
+  <button class="nav-btn" data-view="usage" title="مصرف" onclick="switchView('usage')"><svg width="20" height="20"><use href="#i-chart"/></svg></button>
+  <button class="nav-btn" data-view="timeline" title="خط زمانی" onclick="switchView('timeline')"><svg width="20" height="20"><use href="#i-clock"/></svg></button>
+  <button class="nav-btn" data-view="github" title="گیت‌هاب" onclick="switchView('github')"><svg width="20" height="20"><use href="#i-github"/></svg></button>
+  <div class="rail-sep"></div>
+  <button class="nav-btn" data-view="settings" title="تنظیمات" onclick="switchView('settings')"><svg width="20" height="20"><use href="#i-sliders"/></svg></button>
+  <div class="rail-end">
+    <button class="rail-status" id="brainDot" title="وضعیت مغز ایجنت — کلیک: تنظیمات" onclick="switchView('settings')"><span class="dot"></span></button>
   </div>
-  <div class="chips">
-    <div class="chip project" id="chipProject" title="پروژهٔ فعال — کلیک: مدیریت پروژه‌ها" onclick="openNewChat()">
-      <i class="led"></i>PROJ <b id="projState">—</b>
+</nav>
+
+<!-- ═══ پوستهٔ اصلی ═══ -->
+<div id="main">
+  <header id="topbar">
+    <div class="brand">
+      <span class="brand-name" aria-label="DEVX">DEV<em>X</em></span>
+      <span class="view-title" id="viewTitle">استودیو ایجنت</span>
     </div>
-    <button class="newchat-btn" onclick="openNewChat()">＋ چت جدید</button>
-    <div class="chip" id="chipDeepseek"><i class="led"></i>DEEPSEEK <b id="dsState">—</b></div>
-    <div class="chip" id="chipGithub" style="cursor:pointer" title="اتصال توکن GitHub" onclick="openTokenModal()"><i class="led"></i>GITHUB <b id="ghState">—</b></div>
-    <div class="chip" id="chipMemory"><i class="led"></i>MEMORY <b id="memState">0</b></div>
-    <div class="chip" id="chipSkills"><i class="led"></i>SKILLS <b id="skillState">0</b></div>
-    <div class="chip" id="chipTools"><i class="led"></i>TOOLS <b id="toolState">0</b></div>
-    <button class="cmdk-btn" onclick="openPalette()" title="جستجوی سراسری">⌘K</button>
-    <div class="bell-btn" id="bellBtn" title="اعلان‌ها" onclick="toggleNotif()">
-      🔔<span class="badge" id="notifBadge" style="display:none">0</span>
+    <div class="topbar-actions">
+      <div class="pill click" id="chipProject" title="پروژهٔ فعال — کلیک: مدیریت پروژه‌ها" onclick="switchView('projects')"><i class="led"></i>پروژه <b id="projState">—</b></div>
+      <div class="pill" id="chipDeepseek"><i class="led"></i>مغز <b id="dsState">—</b></div>
+      <div class="pill click" id="chipGithub" title="اتصال گیت‌هاب" onclick="openTokenModal()"><i class="led"></i>GitHub <b id="ghState">—</b></div>
+      <div class="pill" id="chipTools" title="تعداد ابزارهای فعال"><b id="toolState">0</b> ابزار</div>
+      <button class="icon-btn" onclick="openPalette()" title="جستجوی سراسری (⌘K)"><svg width="15" height="15"><use href="#i-search"/></svg></button>
+      <button class="icon-btn" id="bellBtn" title="اعلان‌ها" onclick="toggleNotif()"><svg width="15" height="15"><use href="#i-bell"/></svg><span class="badge" id="notifBadge"></span></button>
+      <span class="clock" id="clock">--:--:--</span>
     </div>
-    <span class="live blink">● LIVE</span>
-    <span class="clock" id="clock">--:--:--</span>
-  </div>
-</header>
+  </header>
 
-<!-- ═══════════ نوار سشن‌های پروژهٔ فعال ═══════════ -->
-<div class="sessbar" id="sessbar">
-  <span class="badge2" style="letter-spacing:1px">SESSIONS</span>
-  <div id="sessTabs" style="display:flex;gap:6px;flex-wrap:wrap"></div>
-  <button class="newchat-btn" style="padding:5px 12px;font-size:11px" onclick="createSession()">＋ سشن</button>
-</div>
+  <div id="views">
 
-<!-- ═══════════ کارت‌های تایید انسانی ═══════════ -->
-<div class="approvals" id="approvals"></div>
-
-<!-- ═══════════ نوار هشدار لاگین دیپ‌سیک ═══════════ -->
-<div id="alertBar">
-  <span class="dot"></span>
-  <span id="alertMsg"><b>ورود لازم است</b> — اکانت دیپ‌سیک لاگین نیست.</span>
-  <button class="btn" style="flex:0 0 auto;padding:7px 16px" onclick="manualLogin()">🔑 باز کردن پنجرهٔ ورود</button>
-  <button class="btn ghost" style="flex:0 0 auto;padding:7px 16px" onclick="reconnect()">↻ اتصال مجدد</button>
-  <button class="btn ghost" style="flex:0 0 auto;padding:7px 16px" onclick="setApiKey()">🧠 کلید API</button>
-</div>
-
-<!-- ═══════════ بدنه ═══════════ -->
-<main>
-  <section class="stream" id="stream">
-    <div id="empty">
-      <div class="radar"><div class="beam"></div><div class="core"></div></div>
-      <h2>سیستم آماده است</h2>
-      <p>یک تسک بده؛ ایجنت با <b>حافظه</b> و <b>مهارت‌های آموخته‌شده</b> اجرا می‌کند ▊</p>
-      <div class="examples">
-        <span class="ex" onclick="useExample(this)">در مخزن agent وضعیت PRها را ببین و خلاصه کن</span>
-        <span class="ex" onclick="useExample(this)">فهرست مخازنم را بده و بزرگ‌ترین را تحلیل کن</span>
-        <span class="ex" onclick="useExample(this)">یک Issue با عنوان «DevX review» بساز</span>
+    <!-- ── نمای چت ─────────────────────────────────────────────── -->
+    <section class="view active" id="view-chat">
+      <div class="chat-sub">
+        <span class="lbl">SESSIONS</span>
+        <div id="sessTabs" style="display:flex;gap:6px"></div>
+        <button class="btn ghost sm" style="flex:0 0 auto" onclick="createSession()"><svg width="12" height="12"><use href="#i-plus"/></svg> سشن</button>
       </div>
-    </div>
-  </section>
-
-  <aside class="side">
-    <!-- حافظه -->
-    <div class="panel">
-      <div class="panel-h"><span class="icon">🧠</span><h3>حافظهٔ ماندگار</h3><span class="cnt" id="memCount">0</span></div>
-      <div class="tabs">
-        <span class="tab active" data-sec="facts" onclick="tabMem(this)">حقایق</span>
-        <span class="tab" data-sec="lessons" onclick="tabMem(this)">درس‌ها</span>
-        <span class="tab" data-sec="tasks" onclick="tabMem(this)">تسک‌ها</span>
-        <span class="tab" data-sec="notes" onclick="tabMem(this)">یادداشت</span>
-      </div>
-      <div class="panel-b" id="memBody"><div class="mem-item">در انتظار داده…</div></div>
-    </div>
-    <!-- مهارت‌ها -->
-    <div class="panel">
-      <div class="panel-h"><span class="icon">🧰</span><h3>مهارت‌های آموخته‌شده</h3><span class="cnt" id="skillCount">0</span></div>
-      <div class="panel-b" id="skillBody"><div class="mem-item">هنوز مهارتی یاد نگرفته — با اولین تسک یاد می‌گیرد.</div></div>
-    </div>
-    <!-- داشبورد اتوماسیون v4 -->
-    <div class="panel">
-      <div class="panel-h"><span class="icon">🛰</span><h3>داشبورد اتوماسیون</h3><span class="cnt" id="dashCnt">—</span></div>
-      <div class="dash-tabs" style="padding:0 14px">
-        <span class="dash-tab active" data-d="sched" onclick="dashTab(this)">⏰ زمان‌بند</span>
-        <span class="dash-tab" data-d="watch" onclick="dashTab(this)">👀 نگهبان</span>
-        <span class="dash-tab" data-d="audit" onclick="dashTab(this)">🛡 ممیزی</span>
-        <span class="dash-tab" data-d="usage" onclick="dashTab(this)">📊 مصرف</span>
-        <span class="dash-tab" data-d="timeline" onclick="dashTab(this)">🕒 خط زمانی</span>
-        <span class="dash-tab" data-d="ckpt" onclick="dashTab(this)">💾 چک‌پوینت</span>
-      </div>
-      <div class="panel-b" id="dashBody"><div class="mem-item">در انتظار داده…</div></div>
-    </div>
-    <!-- گیت‌هاب -->
-    <div class="panel">
-      <div class="panel-h"><span class="icon">⬡</span><h3>GitHub</h3><span class="cnt" id="ghRate">—</span></div>
-      <div class="panel-b" id="ghBody">
-        <div class="mem-item">توکن گیت‌هاب تنظیم نشده — از مودال بالای صفحه وارد کن.</div>
-      </div>
-    </div>
-    <!-- سیستم -->
-    <div class="panel">
-      <div class="panel-h"><span class="icon">⚙</span><h3>سیستم</h3></div>
-      <div class="panel-b">
-        <div class="sys">
-          <span class="kv">MAX_ROUNDS <b id="kvRounds">10</b></span>
-          <span class="kv">MEMORY <b id="kvMem">memory/</b></span>
-          <span class="kv">SKILLS <b id="kvSkill">skills_learned/</b></span>
-          <span class="kv">SUCCESS <b id="kvSuccess">—</b></span>
-          <span class="kv">AUDIT <b id="kvAudit">—</b></span>
+      <div id="chatScroll">
+        <div class="chat-col">
+          <div id="alertBar" class="alert">
+            <span class="a-dot"></span>
+            <span class="a-txt" id="alertMsg"><b>ورود لازم است</b> — مغز ایجنت وصل نیست.</span>
+            <button class="btn sm" onclick="manualLogin()">ورود مرورگر</button>
+            <button class="btn ghost sm" onclick="reconnect()">اتصال مجدد</button>
+            <button class="btn ghost sm" onclick="setApiKey()">کلید API</button>
+          </div>
+          <div id="stream"></div>
         </div>
-        <div class="mini-form" style="margin-top:10px">
-          <button class="btn ghost" style="padding:6px 10px;font-size:11px" onclick="openPersona()">🎭 persona</button>
-          <button class="btn ghost" style="padding:6px 10px;font-size:11px" onclick="openSnapshots()">💾 snapshot</button>
-          <button class="btn ghost" style="padding:6px 10px;font-size:11px" onclick="openBundle()">📦 export/import</button>
-          <button class="btn ghost" style="padding:6px 10px;font-size:11px" onclick="toggleDangerous()" id="btnDanger">⚠️ risky: off</button>
-        </div>
-        <div class="mtop">ایجنت بعد از هر تسکِ موفق <b>مهارت</b> یاد می‌گیرد، با هر خطا <b>درس</b> ثبت می‌کند و یک <b>بازتاب</b> می‌نویسد؛ عملیات خطرناک از <b>دروازهٔ تایید</b> می‌گذرد.</div>
       </div>
-    </div>
-  </aside>
-</main>
+      <div class="chat-foot">
+        <div class="rounds-row" id="rounds" style="display:none"><span id="roundsTxt">ROUND 0/10</span><div class="r-track"><i id="roundsFill"></i></div></div>
+        <div class="composer">
+          <textarea id="taskInput" rows="1" placeholder="تسک را بنویس… (Enter = اجرا / Shift+Enter = خط جدید)"></textarea>
+          <button class="send-btn" id="sendBtn" onclick="sendTask()" disabled>اجرا <svg width="14" height="14"><use href="#i-send"/></svg> <span class="k">ENTER</span></button>
+        </div>
+        <div class="hint-row">Enter اجرا · Shift+Enter خط جدید · Ctrl+K جستجوی سراسری</div>
+      </div>
+    </section>
 
-<!-- ═══════════ نوار ورودی ═══════════ -->
-<div class="inputbar">
-  <div class="ib-inner">
-    <textarea id="taskInput" rows="1" placeholder="تسک را بنویس… (Enter = اجرا / Shift+Enter = خط جدید)"></textarea>
-    <button id="sendBtn" onclick="sendTask()" disabled>▶ اجرا <span class="k">ENTER</span></button>
+    <!-- ── نمای پروژه‌ها ────────────────────────────────────────── -->
+    <section class="view" id="view-projects">
+      <div class="view-scroll"><div class="view-inner">
+        <div class="view-head">
+          <h2><span class="vh-ic"><svg width="17" height="17"><use href="#i-folder"/></svg></span>پروژه‌ها</h2>
+          <p>هر پروژه حافظه و مهارت‌های کاملاً ایزوله دارد؛ آیدی هر پروژه پایدار است و با حذف، آیدی بقیه تغییر نمی‌کند.</p>
+        </div>
+        <div class="card" style="margin-bottom:16px"><div class="card-b">
+          <div class="mini-form" style="margin:0">
+            <input id="projNameInput" placeholder="نام پروژهٔ جدید… (مثلاً: ربات تلگرام)" maxlength="60">
+            <button class="btn solid" id="projSubmit" style="flex:0 0 auto" onclick="createProject()"><svg width="13" height="13"><use href="#i-plus"/></svg> ساخت پروژه</button>
+          </div>
+          <div id="projErr" style="color:var(--err);font-size:12px;margin-top:8px;min-height:16px;line-height:1.8"></div>
+        </div></div>
+        <div class="proj-grid" id="projGrid"></div>
+      </div></div>
+    </section>
+
+    <!-- ── نمای حافظه ───────────────────────────────────────────── -->
+    <section class="view" id="view-memory">
+      <div class="view-scroll"><div class="view-inner">
+        <div class="view-head">
+          <h2><span class="vh-ic"><svg width="17" height="17"><use href="#i-brain"/></svg></span>حافظهٔ ماندگار</h2>
+          <p>ایجنت با کارکردن پرش می‌کند — حقایق، درس‌ها از خطاها و یادداشت‌های پروژهٔ فعال.</p>
+        </div>
+        <div class="stat-grid" id="memStats"></div>
+        <div class="tabs">
+          <span class="tab active" data-sec="facts" onclick="tabMem(this)">حقایق</span>
+          <span class="tab" data-sec="lessons" onclick="tabMem(this)">درس‌ها</span>
+          <span class="tab" data-sec="tasks" onclick="tabMem(this)">تسک‌ها</span>
+          <span class="tab" data-sec="notes" onclick="tabMem(this)">یادداشت</span>
+        </div>
+        <div id="memBody"><div class="empty-note">در انتظار داده…</div></div>
+      </div></div>
+    </section>
+
+    <!-- ── نمای مهارت‌ها ────────────────────────────────────────── -->
+    <section class="view" id="view-skills">
+      <div class="view-scroll"><div class="view-inner">
+        <div class="view-head">
+          <h2><span class="vh-ic"><svg width="17" height="17"><use href="#i-zap"/></svg></span>مهارت‌های آموخته‌شده <span class="cnt" id="skillCount">0</span></h2>
+          <p>بعد از هر تسک موفق یک مهارت نسخه‌بندی می‌شود؛ با هر استفاده موفق اعتمادش بیشتر می‌شود.</p>
+        </div>
+        <div class="skill-grid" id="skillBody"></div>
+      </div></div>
+    </section>
+
+    <!-- ── نمای اتوماسیون ───────────────────────────────────────── -->
+    <section class="view" id="view-auto">
+      <div class="view-scroll"><div class="view-inner">
+        <div class="view-head">
+          <h2><span class="vh-ic"><svg width="17" height="17"><use href="#i-activity"/></svg></span>اتوماسیون <span class="cnt" id="autoCnt">—</span></h2>
+          <p>زمان‌بند تسک‌های خودکار، نگهبان مخازن گیت‌هاب، ممیزی زنجیرهٔ هش و چک‌پوینت‌های قابل ادامه.</p>
+        </div>
+        <div class="tabs">
+          <span class="tab active" data-d="sched" onclick="autoTab(this)">زمان‌بند</span>
+          <span class="tab" data-d="watch" onclick="autoTab(this)">نگهبان مخزن</span>
+          <span class="tab" data-d="audit" onclick="autoTab(this)">ممیزی</span>
+          <span class="tab" data-d="ckpt" onclick="autoTab(this)">چک‌پوینت</span>
+        </div>
+        <div id="autoBody"><div class="empty-note">در انتظار داده…</div></div>
+      </div></div>
+    </section>
+
+    <!-- ── نمای مصرف ────────────────────────────────────────────── -->
+    <section class="view" id="view-usage">
+      <div class="view-scroll"><div class="view-inner">
+        <div class="view-head">
+          <h2><span class="vh-ic"><svg width="17" height="17"><use href="#i-chart"/></svg></span>داشبورد مصرف</h2>
+          <p>شمارش تسک/دور/ابزار/توکن تخمینی به تفکیک روز — روند ۱۴ روز اخیر.</p>
+        </div>
+        <div class="stat-grid" id="usageStats"></div>
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-h"><span class="c-ic"><svg width="14" height="14"><use href="#i-chart"/></svg></span><h3>روند توکن تخمینی — ۱۴ روز اخیر</h3></div>
+          <div class="chart-wrap"><svg class="chart-svg" id="usageChart" viewBox="0 0 560 190" preserveAspectRatio="none"></svg></div>
+        </div>
+        <div id="usageAudit"></div>
+      </div></div>
+    </section>
+
+    <!-- ── نمای خط زمانی ────────────────────────────────────────── -->
+    <section class="view" id="view-timeline">
+      <div class="view-scroll"><div class="view-inner">
+        <div class="view-head">
+          <h2><span class="vh-ic"><svg width="17" height="17"><use href="#i-clock"/></svg></span>خط زمانی پروژه</h2>
+          <p>همهٔ رویدادهای پروژهٔ فعال به ترتیب زمان — از ساخت تا مهارت‌آموزی.</p>
+        </div>
+        <div class="tl" id="tlBody"><div class="empty-note">در انتظار داده…</div></div>
+      </div></div>
+    </section>
+
+    <!-- ── نمای گیت‌هاب ─────────────────────────────────────────── -->
+    <section class="view" id="view-github">
+      <div class="view-scroll"><div class="view-inner">
+        <div class="view-head">
+          <h2><span class="vh-ic"><svg width="17" height="17"><use href="#i-github"/></svg></span>گیت‌هاب <span class="cnt" id="ghRate">—</span></h2>
+          <p>اتصال با ورود مرورگر (بدون هیچ کلید) یا توکن دستی؛ همهٔ عملیات از مسیر رسمی REST.</p>
+        </div>
+        <div id="ghBody"><div class="empty-note">در انتظار داده…</div></div>
+      </div></div>
+    </section>
+
+    <!-- ── نمای تنظیمات ─────────────────────────────────────────── -->
+    <section class="view" id="view-settings">
+      <div class="view-scroll"><div class="view-inner">
+        <div class="view-head">
+          <h2><span class="vh-ic"><svg width="17" height="17"><use href="#i-sliders"/></svg></span>تنظیمات</h2>
+          <p>مغز ایجنت، اتصال گیت‌هاب، persona پروژه، ماشین زمان، بسته‌های قابل حمل و حالت پرخطر.</p>
+        </div>
+
+        <div class="card set-section">
+          <div class="card-h"><span class="c-ic"><svg width="14" height="14"><use href="#i-globe"/></svg></span><h3>مغز ایجنت</h3></div>
+          <div class="set-row">
+            <div class="sr-txt"><b>وضعیت: <span id="brainStateTxt">—</span></b><small id="brainStateMsg">وضعیت اتصال مغز (مرورگر دیپ‌سیک یا مغز API).</small></div>
+            <button class="btn sm" onclick="manualLogin()">ورود مرورگر</button>
+            <button class="btn ghost sm" onclick="reconnect()">اتصال مجدد</button>
+            <button class="btn ghost sm" onclick="setApiKey()">کلید API</button>
+          </div>
+        </div>
+
+        <div class="card set-section">
+          <div class="card-h"><span class="c-ic"><svg width="14" height="14"><use href="#i-github"/></svg></span><h3>اتصال گیت‌هاب</h3></div>
+          <div class="set-row">
+            <div class="sr-txt"><b id="ghSettingsState">وصل نشده</b><small>ورود با مرورگر: کد کوتاه می‌گیری و در مرورگرِ لاگین‌شده تأیید می‌کنی — بدون ساخت هیچ کلیدی.</small></div>
+            <button class="btn sm" onclick="openTokenModal()"><svg width="13" height="13"><use href="#i-globe"/></svg> اتصال</button>
+          </div>
+        </div>
+
+        <div class="card set-section">
+          <div class="card-h"><span class="c-ic"><svg width="14" height="14"><use href="#i-chat"/></svg></span><h3>Persona پروژهٔ فعال</h3></div>
+          <div class="card-b">
+            <textarea id="personaInput" rows="5" placeholder="دستورالعمل همیشگی این پروژه — مثلاً: فقط pnpm، سبک کد Airbnb، پاسخ فارسی…"></textarea>
+            <div class="row" style="margin-top:10px;display:flex;gap:10px">
+              <button class="btn sm" onclick="savePersona()">ذخیره persona</button>
+              <span id="personaErr" style="color:var(--err);font-size:12px;align-self:center"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card set-section">
+          <div class="card-h"><span class="c-ic"><svg width="14" height="14"><use href="#i-save"/></svg></span><h3>ماشین زمان (Snapshot)</h3></div>
+          <div class="card-b">
+            <div class="mini-form" style="margin:0 0 12px">
+              <input id="snapLabel" placeholder="برچسب snapshot (مثلاً: قبل-refactor)">
+              <button class="btn sm" style="flex:0 0 auto" onclick="createSnapshot()">گرفتن</button>
+            </div>
+            <div id="snapList"></div>
+          </div>
+        </div>
+
+        <div class="card set-section">
+          <div class="card-h"><span class="c-ic"><svg width="14" height="14"><use href="#i-package"/></svg></span><h3>بستهٔ قابل حمل</h3></div>
+          <div class="card-b">
+            <button class="btn sm" onclick="exportProject()" style="margin-bottom:12px">خروجی پروژهٔ فعال (ZIP)</button>
+            <div id="bundleList"></div>
+          </div>
+        </div>
+
+        <div class="card set-section">
+          <div class="card-h"><span class="c-ic"><svg width="14" height="14"><use href="#i-warn"/></svg></span><h3>حالت پرخطر</h3></div>
+          <div class="set-row">
+            <div class="sr-txt"><b>اجرای ابزارهای خطرناک بدون تایید</b><small>وقتی روشن باشد delete_repo و ابزارهای مخرب بدون دروازهٔ تایید انسانی اجرا می‌شوند — با احتیاط.</small></div>
+            <button class="switch" id="riskySwitch" onclick="toggleDangerous()" title="روشن/خاموش"></button>
+          </div>
+        </div>
+
+        <div class="card set-section">
+          <div class="card-h"><span class="c-ic"><svg width="14" height="14"><use href="#i-activity"/></svg></span><h3>سیستم</h3></div>
+          <div class="card-b">
+            <div class="kv-grid">
+              <span class="kv">MAX_ROUNDS<b id="kvRounds">10</b></span>
+              <span class="kv">TOOLS<b id="kvTools">—</b></span>
+              <span class="kv">SUCCESS<b id="kvSuccess">—</b></span>
+              <span class="kv">AUDIT<b id="kvAudit">—</b></span>
+              <span class="kv">MEMORY<b id="kvMem">memory/</b></span>
+              <span class="kv">SKILLS<b id="kvSkill">skills_learned/</b></span>
+            </div>
+          </div>
+        </div>
+      </div></div>
+    </section>
+
   </div>
-  <div class="rounds" id="rounds"></div>
 </div>
 
-<div class="toasts" id="toasts"></div>
+<!-- ═══ کارت‌های تایید انسانی ═══ -->
+<div id="approvals"></div>
 
-<!-- ═══════════ مودال توکن گیت‌هاب ═══════════ -->
+<!-- ═══ توست‌ها ═══ -->
+<div id="toasts"></div>
+
+<!-- ═══ ناوبری موبایل ═══ -->
+<nav id="mobileNav" aria-label="ناوبری موبایل">
+  <div class="m-row">
+    <button class="m-nav active" data-view="chat" onclick="switchView('chat')"><svg width="18" height="18"><use href="#i-chat"/></svg>چت</button>
+    <button class="m-nav" data-view="projects" onclick="switchView('projects')"><svg width="18" height="18"><use href="#i-folder"/></svg>پروژه<span class="nav-badge" id="bProjM"></span></button>
+    <button class="m-nav" data-view="memory" onclick="switchView('memory')"><svg width="18" height="18"><use href="#i-brain"/></svg>حافظه<span class="nav-badge" id="bMemM"></span></button>
+    <button class="m-nav" data-view="skills" onclick="switchView('skills')"><svg width="18" height="18"><use href="#i-zap"/></svg>مهارت<span class="nav-badge" id="bSkillM"></span></button>
+    <button class="m-nav" data-view="auto" onclick="switchView('auto')"><svg width="18" height="18"><use href="#i-activity"/></svg>اتوماسیون<span class="nav-badge" id="bAutoM"></span></button>
+    <button class="m-nav" data-view="usage" onclick="switchView('usage')"><svg width="18" height="18"><use href="#i-chart"/></svg>مصرف</button>
+    <button class="m-nav" data-view="timeline" onclick="switchView('timeline')"><svg width="18" height="18"><use href="#i-clock"/></svg>زمان</button>
+    <button class="m-nav" data-view="github" onclick="switchView('github')"><svg width="18" height="18"><use href="#i-github"/></svg>گیت‌هاب</button>
+    <button class="m-nav" data-view="settings" onclick="switchView('settings')"><svg width="18" height="18"><use href="#i-sliders"/></svg>تنظیمات</button>
+  </div>
+</nav>
+
+<!-- ═══ مودال اتصال گیت‌هاب ═══ -->
 <div class="overlay show" id="tokenOverlay">
   <div class="modal" id="tokenModal">
-    <h2>⬡ اتصال GitHub</h2>
+    <h2><span class="m-ic"><svg width="15" height="15"><use href="#i-github"/></svg></span>اتصال GitHub</h2>
     <div class="sub">
-      سریع‌ترین راه — <b style="color:var(--ok)">ورود با مرورگر</b>: هیچ کلیدی نمی‌سازی؛ در مرورگری که از قبل
+      سریع‌ترین راه — <b style="color:var(--teal)">ورود با مرورگر</b>: هیچ کلیدی نمی‌سازی؛ در مرورگری که از قبل
       به گیت‌هاب لاگین هستی فقط یک کد کوتاه را تأیید می‌کنی (مثل مغز دیپ‌سیک — با نشست مرورگر خودت).
     </div>
-    <button class="btn" style="width:100%;padding:10px" onclick="browserLogin()">🌐 ورود با مرورگر (بدون کلید)</button>
-    <div id="ghCodeBox" style="display:none;text-align:center;margin-top:12px">
-      <div class="sub">این کد را در صفحهٔ باز‌شده وارد کن:</div>
-      <div style="font-size:2rem;letter-spacing:.35em;font-weight:700;color:var(--ok);margin:6px 0" id="ghUserCode">----</div>
-      <div class="row" style="justify-content:center">
-        <a class="btn" id="ghVerifyLink" href="https://github.com/login/device" target="_blank" style="text-decoration:none;padding:8px 18px">باز کردن صفحهٔ تأیید</a>
-      </div>
-      <div class="sub" style="margin-top:6px">⏳ منتظر تأیید تو در مرورگر…</div>
+    <button class="btn solid" style="width:100%;padding:11px" onclick="browserLogin()"><svg width="15" height="15"><use href="#i-globe"/></svg> ورود با مرورگر (بدون کلید)</button>
+    <div class="gh-code" id="ghCodeBox" style="display:none">
+      <div style="font-size:12px;color:var(--muted)">این کد را در صفحهٔ باز‌شده وارد کن:</div>
+      <div class="code" id="ghUserCode">----</div>
+      <a class="btn sm" id="ghVerifyLink" href="https://github.com/login/device" target="_blank" rel="noopener" style="text-decoration:none;display:inline-flex">باز کردن صفحهٔ تأیید</a>
+      <div style="font-size:11px;color:var(--faint);margin-top:8px">منتظر تأیید تو در مرورگر…</div>
     </div>
     <div class="sub" style="margin-top:14px">
-      — یا توکن دستی: از <a href="https://github.com/settings/tokens" target="_blank">github.com/settings/tokens</a>
+      — یا توکن دستی: از <a href="https://github.com/settings/tokens" target="_blank" rel="noopener">github.com/settings/tokens</a>
       بساز با اسکوپ <b style="color:var(--yellow)">repo</b> و در صورت نیاز <b style="color:var(--yellow)">workflow</b>.
     </div>
-    <input type="password" id="tokenInput" placeholder="ghp_… یا gho_…" autocomplete="off" spellcheck="false">
+    <input type="password" id="tokenInput" placeholder="توکن گیت‌هاب (ghp_… یا gho_…)" autocomplete="off" spellcheck="false">
     <div class="err" id="tokenErr"></div>
     <div class="row">
-      <button class="btn" id="tokenSubmit" onclick="submitToken()">✓ اعتبارسنجی و اتصال</button>
+      <button class="btn" id="tokenSubmit" onclick="submitToken()">اعتبارسنجی و اتصال</button>
       <button class="btn ghost" onclick="closeTokenModal()">فعلاً نه</button>
     </div>
     <div class="secure"><span class="led"></span> نشست/توکن فقط در حافظهٔ همین اجرا می‌ماند — در فایل، لاگ یا کد ذخیره نمی‌شود.</div>
   </div>
 </div>
 
-<!-- ═══════════ مودال چت جدید / مدیریت پروژه‌ها ═══════════ -->
-<div class="overlay" id="projOverlay">
-  <div class="modal" id="projModal">
-    <h2>📁 چت جدید — نام پروژه</h2>
-    <div class="sub">
-      برای هر چت یک پروژه با <b style="color:var(--yellow)">آیدی خودکار</b> ثبت می‌شود و
-      <b style="color:var(--teal)">حافظه و مهارت‌ها به‌طور کامل ایزوله</b> نگه داشته می‌شوند تا اطلاعات پروژه‌ها قاطی نشود.
-    </div>
-    <input type="text" id="projNameInput" placeholder="نام پروژه… (مثلاً: تست)" autocomplete="off" maxlength="60">
-    <div class="err" id="projErr"></div>
-    <div class="row">
-      <button class="btn" id="projSubmit" onclick="createProject()">✚ ساخت پروژه و شروع</button>
-      <button class="btn ghost" onclick="closeProjModal()">بستن</button>
-    </div>
-    <div class="sub" style="margin-top:16px;margin-bottom:4px">یا ادامهٔ یکی از پروژه‌های موجود:</div>
-    <div class="proj-list" id="projList"></div>
-    <div class="renum-hint" id="renumHint">💡 آیدی هر پروژه پایدار و یکتاست؛ با حذف یک پروژه آیدی بقیه تغییر نمی‌کند تا ارجاع‌های زمان‌بند و نگهبان مخزن سالم بمانند.</div>
-  </div>
-</div>
-
-<!-- ═══════════ مودال Persona ═══════════ -->
-<div class="overlay" id="personaOverlay">
-  <div class="modal">
-    <h2>🎭 Persona پروژهٔ فعال</h2>
-    <div class="sub">دستورالعمل همیشگی این پروژه — در پرامپت همهٔ تسک‌ها تزریق می‌شود (مثلاً «فقط pnpm، سبک کد Airbnb، پاسخ فارسی»).</div>
-    <textarea id="personaInput" rows="6" style="width:100%;background:rgba(0,0,0,.3);border:1px solid var(--line);border-radius:10px;color:var(--text);font-family:var(--fa);font-size:12.5px;padding:10px;outline:none" placeholder="شخصیت/قوانین پروژه…"></textarea>
-    <div class="err" id="personaErr"></div>
-    <div class="row">
-      <button class="btn" onclick="savePersona()">✓ ذخیره</button>
-      <button class="btn ghost" onclick="closeOverlay('personaOverlay')">بستن</button>
-    </div>
-  </div>
-</div>
-
-<!-- ═══════════ مودال Snapshot ═══════════ -->
-<div class="overlay" id="snapOverlay">
-  <div class="modal">
-    <h2>💾 ماشین زمان پروژه</h2>
-    <div class="sub">از کل حافظه + مهارت‌های پروژه snapshot بگیر؛ رول‌بک هم قبلش خودکار یک snapshot از وضعیت فعلی می‌گیرد.</div>
-    <div class="mini-form">
-      <input id="snapLabel" placeholder="برچسب snapshot (مثلاً قبل-refactor)">
-      <button class="btn" onclick="createSnapshot()">＋ گرفتن</button>
-    </div>
-    <div class="proj-list" id="snapList"></div>
-    <div class="row"><button class="btn ghost" onclick="closeOverlay('snapOverlay')">بستن</button></div>
-  </div>
-</div>
-
-<!-- ═══════════ مودال Export/Import ═══════════ -->
-<div class="overlay" id="bundleOverlay">
-  <div class="modal">
-    <h2>📦 بستهٔ قابل‌حمل پروژه</h2>
-    <div class="sub">خروجی پروژه با کل حافظه/مهارت/سشن‌ها به ZIP — و بازگشت آن به‌عنوان پروژهٔ جدید یا قالب شروع.</div>
-    <div class="row" style="margin-bottom:10px">
-      <button class="btn" onclick="exportProject()">⬇ export پروژهٔ فعال</button>
-      <button class="btn ghost" onclick="closeOverlay('bundleOverlay')">بستن</button>
-    </div>
-    <div class="sub" style="margin-bottom:4px">بسته‌های موجود (کلیک = import به پروژهٔ جدید):</div>
-    <div class="proj-list" id="bundleList"></div>
-  </div>
-</div>
-
-<!-- ═══════════ پالت Cmd+K — جستجوی سراسری ═══════════ -->
-<div class="overlay" id="paletteOverlay" onclick="if(event.target===this)closeOverlay('paletteOverlay')">
-  <div class="modal" style="max-width:560px">
-    <h2>🔎 جستجوی سراسری</h2>
-    <input type="text" id="paletteInput" placeholder="جستجو در همهٔ پروژه‌ها/مهارت‌ها… (Enter)" autocomplete="off">
-    <div class="palette" id="paletteBody"><div class="mem-item">نتیجه‌ای برای نمایش نیست.</div></div>
-  </div>
-</div>
-
-<!-- ═══════════ پنل اعلان‌ها ═══════════ -->
+<!-- ═══ مودال اعلان‌ها ═══ -->
 <div class="overlay" id="notifOverlay" onclick="if(event.target===this)closeOverlay('notifOverlay')">
   <div class="modal">
-    <h2>🔔 اعلان‌ها</h2>
-    <div class="row"><button class="btn ghost" onclick="markNotifsRead()">✓ همه خوانده شد</button></div>
-    <div class="proj-list" id="notifBody"><div class="mem-item">اعلانی نیست.</div></div>
+    <h2><span class="m-ic"><svg width="15" height="15"><use href="#i-bell"/></svg></span>اعلان‌ها</h2>
+    <div class="row" style="margin:0 0 12px"><button class="btn ghost sm" onclick="markNotifsRead()">همه خوانده شد</button></div>
+    <div id="notifBody"><div class="empty-note">اعلانی نیست.</div></div>
+  </div>
+</div>
+
+<!-- ═══ پالت جستجوی سراسری ⌘K ═══ -->
+<div class="overlay" id="paletteOverlay" onclick="if(event.target===this)closeOverlay('paletteOverlay')">
+  <div class="modal" style="max-width:580px">
+    <h2><span class="m-ic"><svg width="15" height="15"><use href="#i-search"/></svg></span>جستجوی سراسری</h2>
+    <input type="text" id="paletteInput" placeholder="جستجو در همهٔ پروژه‌ها/مهارت‌ها… (Enter)" autocomplete="off">
+    <div class="palette-list" id="paletteBody"><div class="empty-note">برای جستجو تایپ کن و Enter بزن…</div></div>
   </div>
 </div>
 
 <script>
 /* ═══════════════════════════════════════════════════════════════════
-   DevX frontend logic — vanilla JS، بدون وابستگی
+   DevX Studio — منطق فرانت‌اند (vanilla JS، بدون وابستگی)
    ═══════════════════════════════════════════════════════════════════ */
-const $ = id => document.getElementById(id);
-const stream = $('stream'), toasts = $('toasts');
-let currentToolCard = null, typingTimer = null, running = false;
+const $=id=>document.getElementById(id);
+const stream=$('stream');
+let currentToolCard=null,typingTimer=null,running=false,currentView='chat';
+const VIEW_TITLES={chat:'چت',projects:'پروژه‌ها',memory:'حافظه',skills:'مهارت‌ها',auto:'اتوماسیون',usage:'مصرف',timeline:'خط زمانی',github:'گیت‌هاب',settings:'تنظیمات'};
 
 /* ── ابزارک‌ها ─────────────────────────────────────────────────── */
 function esc(s){const d=document.createElement('div');d.textContent=String(s??'');return d.innerHTML}
-function md(s){ // رندر مارک‌داون سبک: bold / code / link / خط جدید
+function md(s){ // رندر مارک‌داون سبک: bold / code / link
   return esc(s)
-    .replace(/`([^`]+)`/g,'<code style="font-family:var(--mono);color:var(--yellow);background:rgba(255,210,63,.08);padding:1px 5px;border-radius:4px;font-size:12px">$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g,'<b style="color:var(--yellow)">$1</b>')
+    .replace(/`([^`]+)`/g,'<code class="code-chip">$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g,'<b style="color:var(--teal-2)">$1</b>')
     .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,(m,label,url)=>`<a href="${url.replace(/"/g,'%22').replace(/'/g,'%27')}" target="_blank" rel="noopener noreferrer" style="color:var(--teal)">${label}</a>`);
 }
 function toast(kind,msg,ms=4200){
   const t=document.createElement('div');t.className='toast '+kind;t.innerHTML=msg;
-  toasts.appendChild(t);setTimeout(()=>t.remove(),ms);
+  $('toasts').appendChild(t);setTimeout(()=>t.remove(),ms);
 }
 function now(){const d=new Date();return d.toLocaleTimeString('fa-IR',{hour12:false})}
+function clampMsg(s,max=220){const t=String(s||'').trim();return t.length>max?t.slice(0,max-1).trim()+'…':t}
 setInterval(()=>{$('clock').textContent=now()},1000);$('clock').textContent=now();
+function fmt(n){return Number(n||0).toLocaleString('en-US')}
 
+/* ── ناوبری نماها ──────────────────────────────────────────────── */
+function switchView(name){
+  currentView=name;
+  document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.id==='view-'+name));
+  document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===name));
+  $('viewTitle').textContent=VIEW_TITLES[name]||name;
+  loadViewData(name);
+}
+function loadViewData(name){
+  if(name==='memory')loadMemory();
+  else if(name==='skills')loadSkills();
+  else if(name==='projects')loadProjects();
+  else if(name==='auto')loadAuto();
+  else if(name==='usage')loadUsage();
+  else if(name==='timeline')loadTimeline();
+  else if(name==='github')loadGithub();
+  else if(name==='settings')loadSettings();
+}
+function setBadges(base,val){
+  ['b'+base,'b'+base+'M'].forEach(id=>{const el=$(id);if(!el)return;
+    if(val>0){el.textContent=val>99?'99+':val;el.classList.add('show')}
+    else el.classList.remove('show')});
+}
+
+/* ── قهرمانِ چت خالی ───────────────────────────────────────────── */
+function heroHTML(title,sub){
+  return `<div id="empty" class="chat-empty">
+    <div class="orb"><span>DX</span></div>
+    <h3>${title||'سیستم آماده است'}</h3>
+    <p>${sub||'یک تسک بده؛ ایجنت با <b>حافظه</b> و <b>مهارت‌های آموخته‌شده</b> اجرا می‌کند.'}</p>
+    <div class="sugg">
+      <button onclick="useExample(this)"><i>◈</i>در مخزن agent وضعیت PRها را ببین و خلاصه کن</button>
+      <button onclick="useExample(this)"><i>◈</i>فهرست مخازنم را بده و بزرگ‌ترین را تحلیل کن</button>
+      <button onclick="useExample(this)"><i>◈</i>یک Issue با عنوان «DevX review» بساز</button>
+    </div>
+  </div>`;
+}
+function useExample(el){$('taskInput').value=el.textContent.replace(/^◈/,'').trim();$('taskInput').focus();autoGrow();updateSend()}
+function autoGrow(){const t=$('taskInput');t.style.height='auto';t.style.height=Math.min(t.scrollHeight,140)+'px'}
+
+/* ── کارت پیام ─────────────────────────────────────────────────── */
 function card(cls,who,roleText){
-  const c=document.createElement('div');c.className='card '+cls;
-  c.innerHTML=`<div class="who"><span class="role">${roleText}</span>${who}</div>`;
+  const c=document.createElement('div');
+  c.className='msg '+(cls==='final'?'assistant final':cls);
+  c.innerHTML=`<div class="m-head"><span class="role">${roleText}</span><span class="who">${who}</span></div>`;
   return c;
 }
-function useExample(el){$('taskInput').value=el.textContent;$('taskInput').focus();autoGrow();updateSend()}
-function autoGrow(){const t=$('taskInput');t.style.height='auto';t.style.height=Math.min(t.scrollHeight,130)+'px'}
 
-/* ── نشانگر دورها ─────────────────────────────────────────────── */
+/* ── نشانگر دورها ──────────────────────────────────────────────── */
 function renderRounds(cur,max){
-  const r=$('rounds');
-  let dots='';
-  for(let i=1;i<=max;i++){
-    let cls='dot';
-    if(i<cur)cls+=' done';else if(i===cur)cls+=' cur';
-    dots+=`<span class="${cls}"></span>`;
-  }
-  r.innerHTML=`ROUNDS ${cur}/${max} &nbsp;`+dots;
+  const r=$('rounds');r.style.display='flex';
+  $('roundsTxt').textContent=`ROUND ${cur}/${max}`;
+  $('roundsFill').style.width=(max?Math.round(100*Math.min(cur,max)/max):0)+'%';
 }
-function finishRounds(){const r=$('rounds');r.querySelectorAll('.dot.cur').forEach(d=>d.classList.remove('cur'));}
+function finishRounds(){setTimeout(()=>{$('rounds').style.display='none'},1500)}
 
-/* ── کارت ابزار ───────────────────────────────────────────────── */
+/* ── کارت ابزار ────────────────────────────────────────────────── */
 function addToolCard(tool,args,round){
   const c=card('tool','','TOOL');
   c.innerHTML=`
-    <div class="head" onclick="this.parentElement.classList.toggle('open')">
-      <span class="icon">⚙</span>
-      <span class="tname">${esc(tool)}</span>
-      <span class="rno">R${round}</span>
-      <span class="status run"><span class="spin"></span> running…</span>
+    <div class="t-head" onclick="this.parentElement.classList.toggle('open')">
+      <span class="t-ic"><svg width="13" height="13"><use href="#i-zap"/></svg></span>
+      <span class="t-name">${esc(tool)}</span>
+      <span class="t-round">R${round}</span>
+      <span class="t-status run"><span class="spin"></span> در حال اجرا</span>
     </div>
-    <div class="detail">
+    <div class="t-body">
       <pre>args = ${esc(JSON.stringify(args,null,2))}</pre>
-      <pre class="res" style="color:var(--faint)">result = …</pre>
+      <pre class="res" style="color:var(--faint);margin-top:8px">result = …</pre>
     </div>`;
   stream.appendChild(c);
   c.scrollIntoView({behavior:'smooth',block:'end'});
   return c;
 }
 function settleToolCard(c,ok,preview){
-  const st=c.querySelector('.status');st.className='status '+(ok?'ok':'fail');
-  st.innerHTML=(ok?'✅ OK':'❌ ERROR');
-  c.querySelector('.icon').classList.toggle('err',!ok);
+  const st=c.querySelector('.t-status');st.className='t-status '+(ok?'ok':'fail');
+  st.innerHTML=ok?'✓ انجام شد':'✕ خطا';
+  c.querySelector('.t-ic').classList.toggle('err',!ok);
   const res=c.querySelector('.res');
   res.textContent='result = '+(preview||'');
   res.style.color=ok?'var(--faint)':'var(--err)';
 }
 
-/* ── پاسخ نهایی با اثر ماشین‌نویس ─────────────────────────────── */
+/* ── پاسخ نهایی با اثر تایپ ────────────────────────────────────── */
 function typeFinal(answer,ok){
-  const c=card(ok?'final':'user','DevX','FINAL');
+  const c=card('final',`DevX · ${now()}`,'FINAL');
   const txt=document.createElement('div');txt.className='txt';
   c.appendChild(txt);stream.appendChild(c);
-  let i=0;const speed=Math.max(8,Math.min(28, 900/Math.max(1,answer.length/40)));
+  let i=0;const speed=Math.max(8,Math.min(28,900/Math.max(1,answer.length/40)));
   if(typingTimer)clearInterval(typingTimer);
   typingTimer=setInterval(()=>{
     i+=Math.ceil(answer.length/120)+1;
@@ -823,183 +1095,320 @@ function typeFinal(answer,ok){
   stream.lastChild?.scrollIntoView({behavior:'smooth',block:'end'});
 }
 
-/* ── پنل حافظه ────────────────────────────────────────────────── */
+/* ── استریم جزئی پاسخ ──────────────────────────────────────────── */
+let streamCardEl=null;
+function streamingCard(text){
+  $('empty')?.remove();
+  if(!streamCardEl){
+    streamCardEl=card('final','DevX','STREAMING');
+    const txt=document.createElement('div');txt.className='txt';
+    streamCardEl.appendChild(txt);stream.appendChild(streamCardEl);
+  }
+  streamCardEl.querySelector('.txt').innerHTML=md(text||'')+'<span class="caret"></span>';
+  streamCardEl.scrollIntoView({behavior:'smooth',block:'end'});
+}
+function stopStreaming(){if(streamCardEl){streamCardEl.remove();streamCardEl=null}}
+
+/* ── وضعیت کلی ─────────────────────────────────────────────────── */
+let projAskedOnce=false;
+async function loadState(){
+  try{
+    const r=await fetch('/api/state');const s=await r.json();
+    window.__lastState=JSON.stringify(s);
+    /* چیپ‌های هدر */
+    $('toolState').textContent=s.tools;$('kvTools').textContent=s.tools;
+    $('kvRounds').textContent=s.max_rounds;
+    $('kvSuccess').textContent=s.memory&&s.memory.stats.success_rate!=null?Math.round(s.memory.stats.success_rate*100)+'%':'—';
+    $('kvAudit').textContent=s.audit&&s.audit.verify?(s.audit.verify.ok?'OK':'TAMPERED'):'—';
+    /* اعلان‌ها و تاییدهای در انتظار */
+    if(s.notifications){const n=s.notifications.unread||0;const b=$('notifBadge');
+      b.classList.toggle('show',n>0);b.textContent=n>9?'9+':n;}
+    if(s.approvals&&s.approvals.items)(s.approvals.items||[]).forEach(renderApprovalCard);
+    if(s.sessions)renderSessions(s.sessions.sessions,s.sessions.active_id);
+    /* حافظه — نشانگرها و آمار */
+    const c=s.memory.counts||{};
+    setBadges('Mem',(c.facts||0)+(c.lessons||0)+(c.notes||0)+(c.reflections||0));
+    renderMemStats(c);
+    /* پروژهٔ فعال */
+    renderProject(s.project);
+    /* مغز */
+    const ds=s.deepseek,cds=$('chipDeepseek');
+    cds.className='pill '+(ds.ready?'on':'err');
+    $('dsState').textContent=ds.ready?'آماده':'قطع';
+    $('brainDot').className='rail-status'+(ds.ready?' on':'');
+    $('brainStateTxt').textContent=ds.ready?'آماده ✓':(ds.started!==false?'در انتظار اتصال…':'لاگین لازم است');
+    $('brainStateMsg').textContent=clampMsg(ds.message||'وضعیت اتصال مغز (مرورگر دیپ‌سیک یا مغز API).');
+    $('brainStateMsg').title=ds.message||'';
+    const bar=$('alertBar');
+    if(!ds.ready){
+      bar.classList.add('show');
+      $('alertMsg').innerHTML=`<b>${ds.started!==false?'انتظار اتصال':'ورود لازم است'}</b> — <span dir="auto" style="unicode-bidi:plaintext">${esc(clampMsg(ds.message||''))}</span>`;
+    }
+    else bar.classList.remove('show');
+    $('sendBtn').disabled=running||!ds.ready;
+    /* مودال گیت‌هاب — بعد از «فعلاً نه» در این سشن دیگر خودکار باز نشود */
+    if(s.token.set||sessionStorage.getItem('dxTokenSkip')==='1'){$('tokenOverlay').classList.remove('show');}
+    else{$('tokenOverlay').classList.add('show');}
+    /* گیت‌هاب در تنظیمات */
+    $('ghSettingsState').textContent=s.token.set?`وصل شده (${s.token.login||''})`:'وصل نشده';
+    /* بدون پروژهٔ فعال → نمای پروژه‌ها */
+    if(!s.project.active&&!running&&!projAskedOnce){
+      projAskedOnce=true;switchView('projects');$('projNameInput')?.focus();
+    }
+    /* حالت پرخطر */
+    const act=s.project.active;
+    $('riskySwitch').classList.toggle('on',!!(act&&act.settings&&act.settings.allow_dangerous));
+  }catch(e){console.warn('state load failed',e)}
+}
+function renderMemStats(c){
+  const el=$('memStats');if(!el)return;
+  el.innerHTML=[
+    ['حقایق',c.facts],['درس‌ها',c.lessons],['یادداشت',c.notes],['بازتاب',c.reflections],['تسک‌ها',c.tasks]
+  ].map(([l,v])=>`<div class="stat accent"><span class="s-lbl">${l}</span><span class="s-val">${v||0}</span></div>`).join('');
+}
+
+/* ── ارسال تسک ─────────────────────────────────────────────────── */
+function updateSend(){$('sendBtn').disabled=running||!$('taskInput').value.trim()||!$('chipDeepseek').classList.contains('on')}
+async function sendTask(){
+  const task=$('taskInput').value.trim();
+  if(!task||running)return;
+  try{
+    const r=await fetch('/api/task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task})});
+    const j=await r.json();
+    if(!j.ok){toast('err','⛔ '+esc(j.error||'شروع تسک ناموفق بود'));return}
+    $('taskInput').value='';autoGrow();updateSend();
+    $('empty')?.remove();
+    const pj=j.project;
+    const who=`تو · ${now()} ${pj?`<span style="font-family:var(--mono);font-size:10px;color:var(--faint)">PROJ #${pj.id}</span>`:''}`;
+    const c=card('user',who,'TASK');
+    c.innerHTML+=`<div class="txt">${esc(task)}</div>`;
+    stream.appendChild(c);c.scrollIntoView({behavior:'smooth',block:'end'});
+  }catch(e){toast('err','خطای شبکه: '+esc(e))}
+}
+$('taskInput').addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendTask()}
+});
+$('taskInput').addEventListener('input',autoGrow);
+
+/* ── اتصال SSE و رویدادها ──────────────────────────────────────── */
+const es=new EventSource('/api/stream');
+es.onmessage=ev=>{
+  let m;try{m=JSON.parse(ev.data)}catch(_){return}
+  const e=m.event;
+  /* رویدادهای replay فقط برای نوسازی وضعیت — تا کارت/توست تکراری نسازیم */
+  if(m.replay&&!['snapshot','deepseek_state','token_state','projects_updated','sessions_updated','notifications_updated','approvals_updated'].includes(e))return;
+  switch(e){
+    case 'snapshot': refreshAll(); break;
+    case 'deepseek_state': loadState(); break;
+    case 'token_state': loadState(); loadGithub();
+      toast('ok',`گیت‌هاب متصل شد: <b>${esc(m.login)}</b>`); break;
+    case 'task_start':
+      running=true;updateSend();renderRounds(0,m.max_rounds);
+      $('empty')?.remove();
+      if(m.project&&m.project.id!=null)toast('info',`تسک در پروژهٔ <b>#${m.project.id} ${esc(m.project.name||'')}</b> شروع شد`);
+      else toast('info','تسک شروع شد'); break;
+    case 'round': renderRounds(m.round,m.max_rounds); break;
+    case 'tool_call':
+      currentToolCard=addToolCard(m.tool,m.arguments,m.round);
+      if(m.tool==='save_memory'||m.tool==='save_skill')setTimeout(refreshAll,1200);
+      break;
+    case 'tool_result':
+      if(currentToolCard)settleToolCard(currentToolCard,m.ok,m.preview);
+      break;
+    case 'context':
+      if(m.memory||m.skills)toast('info','حافظه/مهارت مرتبط به پرامپت تزریق شد');
+      break;
+    case 'final':
+      running=false;finishRounds();updateSend();stopStreaming();typeFinal(m.answer,m.ok);break;
+    case 'answer_delta':
+      streamingCard(m.text);break;
+    case 'skill_learned':
+      toast('ok',`مهارت جدید (نسخهٔ ${m.version||1}): <b>${esc(m.name||'')}</b>`);loadSkills();break;
+    case 'lesson_learned':
+      toast('info',`درس ثبت شد: ${esc((m.text||'').slice(0,90))}…`);loadMemory();break;
+    case 'reflection':
+      toast('info',`بازتاب ثبت شد: ${esc((m.text||'').slice(0,80))}…`);break;
+    case 'subtask_start':
+      toast('info',`زیرایجنت <b>${esc(m.role)}</b> شروع شد`);break;
+    case 'subtask_end':
+      toast(m.ok?'ok':'err',`زیرایجنت ${esc(m.role||'')} ${m.ok?'تمام شد':'ناتمام'} (${m.rounds||0} دور)`);break;
+    case 'checkpoint_saved':
+      toast('info',`چک‌پوینت ذخیره شد (دور ${m.round})`,2600);break;
+    case 'chat_rollover':
+      toast('info',`<b>چرخش چت</b> — سقف context؛ چت جدید ساخته شد و راهنمای پروژه منتقل شد (دلیل: ${m.reason==='site_error'?'پیام سایت':'نزدیکِ سقف'})`,7000);break;
+    case 'approval_requested':
+      renderApprovalCard(m);break;
+    case 'approval_resolved':
+      clearApprovalCard(m.approval_id);loadApprovals();
+      toast(m.approved?'ok':'err',m.approved?`تایید شد: ${esc(m.tool)}`:`رد شد: ${esc(m.tool)}`);break;
+    case 'task_end':
+      running=false;finishRounds();updateSend();stopStreaming();refreshAll();
+      toast(m.ok?'ok':'err',m.ok?'تسک تمام شد':'تسک با مشکل تمام شد');
+      break;
+    case 'memory_updated': refreshAll(); break;
+    case 'sessions_updated': renderSessions(m.sessions,m.active_id); break;
+    case 'schedule_fired': case 'watch_changed': case 'snapshot_created': case 'snapshot_restored':
+      loadDash(); break;
+    case 'project_created':
+      toast('ok',`پروژهٔ «<b>${esc(m.project.name)}</b>» ثبت شد — آیدی <b>${m.project.id}</b>`);break;
+    case 'project_switched':
+      toast('ok',`پروژهٔ فعال: <b>#${m.project.id} ${esc(m.project.name)}</b>`);break;
+    case 'project_deleted':
+      toast('info',`پروژهٔ «${esc(m.deleted.name)}» حذف شد`);break;
+    case 'projects_updated': refreshAll(); break;
+  }
+};
+es.onerror=()=>{ /* EventSource خودش reconnect می‌کند */ };
+
+function refreshAll(){
+  loadState();loadSessions();loadApprovals();loadBell();loadMemory();
+  if(currentView!=='chat'&&currentView!=='memory')loadViewData(currentView);
+}
+/* ═══════════ بخش ۲: نماها و مودال‌ها ═══════════ */
+
+/* ── حافظه ─────────────────────────────────────────────────────── */
 let memSection='facts';
 function tabMem(el){
-  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('#view-memory .tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');memSection=el.dataset.sec;loadMemory();
 }
 async function loadMemory(){
   try{
     const r=await fetch(`/api/memory?section=${memSection}`);const j=await r.json();
-    const body=$('memBody');
+    const body=$('memBody');if(!body)return;
     if(memSection==='tasks'){
       const tasks=j.tasks||[];
       body.innerHTML=tasks.length?tasks.map(t=>`
-        <div class="mem-item ${t.ok?'':'lesson'}">
-          ${esc(t.task)}<br>
-          <span style="color:${t.ok?'var(--ok)':'var(--err)'};font-family:var(--mono);font-size:10px;direction:ltr;display:inline-block">
-          ${t.ok?'✅ OK':'❌ FAIL'} · ${t.rounds}R · ${t.duration_s}s</span>
-          ${t.skill?`<span class="meta">🧰 ${esc(t.skill)}</span>`:''}
-          <span class="meta">${esc(t.ts)}</span>
-        </div>`).join(''):'<div class="mem-item">هنوز تسکی اجرا نشده.</div>';
+        <div class="list-item ${t.ok?'task-ok':'task-fail'}">
+          ${esc(t.task)}
+          <span class="li-meta"><span style="color:${t.ok?'var(--ok)':'var(--err)'}">${t.ok?'OK':'FAIL'}</span><span>${t.rounds}R</span><span>${t.duration_s}s</span>${t.skill?`<span>skill: ${esc(t.skill)}</span>`:''}<span>${esc(t.ts)}</span></span>
+        </div>`).join(''):'<div class="empty-note">هنوز تسکی اجرا نشده.</div>';
     }else{
       const items=j[memSection]||[];
       body.innerHTML=items.length?items.map(i=>`
-        <div class="mem-item ${memSection==='facts'?'':memSection}">${esc(i.text)}
-          <span class="meta">hits:${i.hits||0} · ${esc(i.ts)}</span></div>`).join('')
-        :'<div class="mem-item">خالی است — ایجنت خودش با کارکردن پرش می‌کند.</div>';
+        <div class="list-item ${memSection==='facts'?'fact':memSection}">
+          ${esc(i.text)}
+          <span class="li-meta"><span>hits: ${i.hits||0}</span><span>${esc(i.ts)}</span></span>
+        </div>`).join('')
+        :'<div class="empty-note">خالی است — ایجنت خودش با کارکردن پرش می‌کند.</div>';
     }
   }catch(e){console.warn('memory load failed',e)}
 }
 
-/* ── پنل مهارت‌ها ─────────────────────────────────────────────── */
+/* ── مهارت‌ها ──────────────────────────────────────────────────── */
 async function loadSkills(){
   try{
     const r=await fetch('/api/skills');const j=await r.json();
-    const skills=j.skills||[];$('skillCount').textContent=skills.length;$('skillState').textContent=skills.length;
-    $('skillBody').innerHTML=skills.length?skills.map(s=>`
-      <div class="skill">
+    const skills=j.skills||[];
+    $('skillCount').textContent=skills.length;
+    setBadges('Skill',skills.length);
+    const body=$('skillBody');if(!body)return;
+    body.innerHTML=skills.length?skills.map(s=>`
+      <div class="skill-card">
         <h4>${esc(s.name)}</h4>
         <p>${esc(s.description||'')}</p>
-        <div class="bars">
-          <div class="bar"><i style="width:${Math.min(100,s.usage*12)}%"></i></div>
-          <span class="num">use ${s.usage} · ok ${s.success}</span>
+        <div class="s-meta">
+          <div class="bar"><i style="width:${Math.min(100,(s.usage||0)*12)}%"></i></div>
+          <span>use ${s.usage||0} · ok ${s.success||0}</span>
         </div>
       </div>`).join('')
-      :'<div class="mem-item">هنوز مهارتی یاد نگرفته — با اولین تسک یاد می‌گیرد.</div>';
+      :'<div class="empty-note" style="grid-column:1/-1">هنوز مهارتی یاد نگرفته — با اولین تسک یاد می‌گیرد.</div>';
   }catch(e){console.warn('skills load failed',e)}
 }
 
-/* ── پنل گیت‌هاب ──────────────────────────────────────────────── */
+/* ── گیت‌هاب ───────────────────────────────────────────────────── */
 async function loadGithub(){
   try{
     const r=await fetch('/api/github/overview');const j=await r.json();
     const body=$('ghBody'),chip=$('chipGithub');
     if(!j.ok){
-      body.innerHTML='<div class="mem-item">توکن گیت‌هاب تنظیم نشده — از مودال بالای صفحه وارد کن.</div>';
-      chip.className='chip';$('ghState').textContent='—';$('ghRate').textContent='—';return;
+      if(body)body.innerHTML=`<div class="empty-note">گیت‌هاب وصل نشده — با «ورود با مرورگر» در چند ثانیه وصل شو، بدون ساخت هیچ کلیدی.<br><button class="btn sm" style="margin-top:12px" onclick="openTokenModal()">اتصال گیت‌هاب</button></div>`;
+      chip.className='pill click';$('ghState').textContent='—';$('ghRate').textContent='—';
+      $('ghSettingsState').textContent='وصل نشده';return;
     }
-    chip.className='chip on';$('ghState').textContent=j.user.login;
+    chip.className='pill click on';$('ghState').textContent=j.user.login;
     $('ghRate').textContent=`${j.rate.remaining}/${j.rate.limit}`;
+    $('ghSettingsState').textContent=`وصل شده (${j.user.login})`;
+    if(!body)return;
     const repos=j.repos||[];
+    const ratePct=j.rate.limit?Math.round(100*j.rate.remaining/j.rate.limit):0;
     body.innerHTML=`
-      <div class="gh-user">
-        <div class="gh-avatar"></div>
-        <div><b>${esc(j.user.login)}</b>
-        <small>${esc(j.user.name||'—')} · scopes: ${esc(j.user.token_scopes||'—')}</small></div>
-      </div>` +
-      repos.map(r=>`<div class="repo"><b>${esc(r.full_name)}</b>
-        <span class="tag ${r.private?'private':'public'}">${r.private?'PRIVATE':'PUBLIC'}</span></div>`).join('') ||
-      '<div class="mem-item">مخزنی یافت نشد.</div>';
+      <div class="card" style="margin-bottom:16px"><div class="card-b">
+        <div class="gh-user">
+          <img class="gh-avatar" src="https://github.com/${esc(j.user.login)}.png" alt="" onerror="this.style.display='none'">
+          <div><b>${esc(j.user.login)}</b><small>${esc(j.user.name||'—')} · اسکوپ‌ها: ${esc(j.user.token_scopes||'—')}</small></div>
+        </div>
+        <div class="rate-row" style="margin-top:14px">
+          <span>RATE ${j.rate.remaining}/${j.rate.limit}</span>
+          <div class="bar" style="flex:1"><i style="width:${ratePct}%"></i></div>
+        </div>
+      </div></div>` +
+      (repos.length?repos.map(r=>`
+        <div class="repo-row" style="margin-bottom:8px">
+          <b>${esc(r.full_name)}</b>
+          <span class="tag ${r.private?'private':'public'}">${r.private?'PRIVATE':'PUBLIC'}</span>
+        </div>`).join(''):'<div class="empty-note">مخزنی یافت نشد.</div>');
   }catch(e){console.warn('github load failed',e)}
 }
 
-/* ── وضعیت کلی ────────────────────────────────────────────────── */
-async function loadState(){
-  try{
-    const r=await fetch('/api/state');const s=await r.json();
-    window.__lastState=JSON.stringify(s);
-    $('toolState').textContent=s.tools;
-    $('kvRounds').textContent=s.max_rounds;
-    $('kvSuccess').textContent=s.memory&&s.memory.stats.success_rate!=null
-      ? Math.round(s.memory.stats.success_rate*100)+'%' : '—';
-    $('kvAudit').textContent=s.audit&&s.audit.verify?(s.audit.verify.ok?'OK':'TAMPERED'):'—';
-    // اعلان‌ها/تاییدهای در انتظار از snapshot
-    if(s.notifications){const b=$('notifBadge');const n=s.notifications.unread||0;
-      b.style.display=n>0?'flex':'none';b.textContent=n>9?'9+':n;}
-    if(s.approvals&&s.approvals.items)(s.approvals.items||[]).forEach(renderApprovalCard);
-    if(s.sessions)renderSessions(s.sessions.sessions,s.sessions.active_id);
-    const c=s.memory.counts;$('memState').textContent=c.facts+c.lessons+c.tasks+c.notes+c.reflections;
-    $('memCount').textContent=c.facts+c.lessons+c.notes+c.reflections;
-    $('chipMemory').className='chip '+(c.facts+c.lessons+c.notes>0?'on':'');
-    // دیپ‌سیک
-    const ds=s.deepseek,cds=$('chipDeepseek');
-    cds.className='chip '+(ds.ready?'on':'err');
-    $('dsState').textContent=ds.ready?'READY':'WAIT';
-    const bar=$('alertBar');
-    if(!ds.ready&&ds.started!==false){bar.classList.add('show');$('alertMsg').innerHTML=`<b>انتظار اتصال</b> — ${esc(ds.message||'')}`;}
-    else if(!ds.ready){bar.classList.add('show');$('alertMsg').innerHTML=`<b>ورود لازم است</b> — ${esc(ds.message||'')}`;}
-    else bar.classList.remove('show');
-    $('sendBtn').disabled=running||!ds.ready;
-    // توکن — بعد از «فعلاً نه» در این سشن دیگر خودکار باز نشود (باگ پاس ۴:
-    // هر رفرش state اوورلی را دوباره show می‌کرد و کل UI را می‌بست)؛
-    // بازکردن دستی: کلیک روی چیپ GITHUB در هدر
-    if(s.token.set || sessionStorage.getItem('dxTokenSkip')==='1'){$('tokenOverlay').classList.remove('show');}
-    else{$('tokenOverlay').classList.add('show');}
-    // پروژه‌ها — بدون پروژهٔ فعال: مودال «چت جدید + نام» خودکار باز می‌شود
-    renderProject(s.project);
-    if(!s.project.active && !running && !projAskedOnce){
-      projAskedOnce=true;openNewChat(true);
-    }
-    $('kvMem').textContent='memory/';$('kvSkill').textContent='skills_learned/';
-  }catch(e){console.warn('state load failed',e)}
-}
-
-/* ── پروژه‌ها ─────────────────────────────────────────────────── */
-let projAskedOnce=false, projOpen=false;
+/* ── پروژه‌ها ──────────────────────────────────────────────────── */
 function renderProject(p){
-  if(!p){return}
+  if(!p)return;
   const a=p.active;
   $('projState').textContent=a?`#${a.id} ${a.name}`:'—';
-  $('chipProject').className='chip project'+(a?'':' blink');
-  // پنل سیستم: محل حافظهٔ ایزولهٔ پروژهٔ فعال
   $('kvMem').textContent=a?`memory/projects/#${a.id}/`:'memory/';
   $('kvSkill').textContent=a?`skills/projects/#${a.id}/`:'skills_learned/';
-  if(projOpen)fillProjList(p.list,p.active,p.next_default_name);
+  setBadges('Proj',(p.list||[]).length);
+  if(currentView==='projects')fillProjList(p.list,p.active,p.next_default_name);
 }
-async function openNewChat(auto=false){
-  projOpen=true;
-  $('projOverlay').classList.add('show');
-  $('projNameInput').placeholder=`نام پروژه… (مثلاً: تست)`;
+async function loadProjects(){
   try{
     const r=await fetch('/api/projects');const j=await r.json();
     if(j.ok)fillProjList(j.projects,j.active,j.next_default_name);
   }catch(e){console.warn('projects load failed',e)}
 }
-function closeProjModal(){projOpen=false;$('projOverlay').classList.remove('show')}
 function fillProjList(items,active,nextDefault){
-  $('projNameInput').placeholder=`نام پروژه… (پیش‌فرض: ${nextDefault||'پروژه N'})`;
-  const list=$('projList');
+  const grid=$('projGrid');if(!grid)return;
+  $('projNameInput').placeholder=`نام پروژهٔ جدید… (پیش‌فرض: ${nextDefault||'پروژهٔ بعدی'})`;
   if(!items||!items.length){
-    list.innerHTML='<div class="mem-item">هنوز پروژه‌ای نیست — نام پروژهٔ اول را بنویس.</div>';return;
+    grid.innerHTML='<div class="empty-note" style="grid-column:1/-1">هنوز پروژه‌ای نیست — نام پروژهٔ اول را بالا بنویس.</div>';return;
   }
-  // نام‌ها از طریق map خوانده می‌شوند (بدون درج رشته در onclick — ضد نام‌های خاص)
+  /* نام‌ها از طریق map خوانده می‌شوند (بدون درج رشته در onclick — ضد نام‌های خاص) */
   window.__projMap={};items.forEach(p=>{window.__projMap[p.id]=p.name;});
-  list.innerHTML=items.map(p=>`
-    <div class="proj-item ${active&&active.id===p.id?'active':''}" onclick="selectProject(${p.id})">
-      <span class="pid">#${p.id}</span>
-      <span class="pname" title="دبل‌کلیک: تغییر نام" ondblclick="event.stopPropagation();renameProject(${p.id})">${esc(p.name)}</span>
-      <span class="pstats">${p.task_count||0} tasks</span>
-      <button class="del" onclick="event.stopPropagation();deleteProject(${p.id})">🗑</button>
+  grid.innerHTML=items.map(p=>`
+    <div class="proj-card ${active&&active.id===p.id?'active':''}" onclick="selectProject(${p.id})">
+      ${active&&active.id===p.id?'<span class="active-ring"></span>':''}
+      <button class="x-btn p-del" title="حذف پروژه" onclick="event.stopPropagation();deleteProject(${p.id})">حذف</button>
+      <span class="p-id">#${p.id}</span>
+      <span class="p-name" title="دبل‌کلیک: تغییر نام" ondblclick="event.stopPropagation();renameProject(${p.id})">${esc(p.name)}</span>
+      <span class="p-stats">${p.task_count||0} tasks${active&&active.id===p.id?' · ACTIVE':''}</span>
     </div>`).join('');
 }
 async function createProject(){
   const name=$('projNameInput').value.trim(),err=$('projErr'),btn=$('projSubmit');
   err.textContent='';
-  btn.disabled=true;btn.innerHTML='<span class="spin"></span> در حال ثبت آیدی…';
+  btn.disabled=true;btn.innerHTML='<span class="spin"></span> در حال ثبت…';
   try{
     const r=await fetch('/api/projects',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
     const j=await r.json();
     if(j.ok){
       const p=j.project;
-      toast('ok',`📁 پروژهٔ «<b>${esc(p.name)}</b>» ساخته شد — <b>آیدی ${p.id}</b> خودکار ثبت شد · حافظهٔ ایزوله`);
-      $('projNameInput').value='';closeProjModal();
-      startNewChatView();
-      refreshAll();
+      toast('ok',`پروژهٔ «<b>${esc(p.name)}</b>» ساخته شد — آیدی <b>${p.id}</b> · حافظهٔ ایزوله`);
+      $('projNameInput').value='';
+      startNewChatView();refreshAll();
     }else{
       err.textContent=j.error||'ساخت پروژه ناموفق بود.';
-      const modal=$('projModal');modal.classList.remove('shake');void modal.offsetWidth;modal.classList.add('shake');
+      const modal=$('projErr');modal.classList.remove('shake');void modal.offsetWidth;
     }
   }catch(e){err.textContent='خطای ارتباط با سرور.'}
-  finally{btn.disabled=false;btn.textContent='✚ ساخت پروژه و شروع'}
+  finally{btn.disabled=false;btn.innerHTML='ساخت پروژه'}
 }
 async function selectProject(id){
   const r=await fetch('/api/projects/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
   const j=await r.json();
   if(j.ok){
-    toast('ok',`🎯 سوییچ به پروژهٔ <b>#${j.project.id} ${esc(j.project.name)}</b> — حافظهٔ ایزولهٔ همان پروژه بارگذاری شد`);
-    closeProjModal();startNewChatView();refreshAll();
+    toast('ok',`سوییچ به پروژهٔ <b>#${j.project.id} ${esc(j.project.name)}</b> — حافظهٔ ایزوله بارگذاری شد`);
+    startNewChatView();refreshAll();
   }else toast('err','⛔ '+esc(j.error||'سوییچ ناموفق'));
 }
 async function deleteProject(id){
@@ -1008,7 +1417,7 @@ async function deleteProject(id){
   const r=await fetch('/api/projects/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
   const j=await r.json();
   if(j.ok){
-    toast('ok',`🗑 پروژهٔ «${esc(j.deleted.name)}» حذف شد — آیدی پروژه‌های دیگر پایدار ماند`);
+    toast('ok',`پروژهٔ «${esc(j.deleted.name)}» حذف شد — آیدی بقیه پایدار ماند`);
     startNewChatView();refreshAll();
   }else toast('err','⛔ '+esc(j.error||'حذف ناموفق'));
 }
@@ -1018,24 +1427,105 @@ async function renameProject(id){
   if(!name||name===old)return;
   const r=await fetch('/api/projects/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,name})});
   const j=await r.json();
-  if(j.ok){toast('ok',`✏️ نام به «${esc(name)}» تغییر کرد`);refreshAll();}
+  if(j.ok){toast('ok',`نام به «${esc(name)}» تغییر کرد`);refreshAll();}
   else toast('err','⛔ '+esc(j.error||'تغییر نام ناموفق'));
 }
 function startNewChatView(){
-  // چت جدید: استریم خالی می‌شود (حافظهٔ ایزولهٔ پروژهٔ تازه/سوییچ‌شده)
-  stream.innerHTML='';
-  $('rounds').innerHTML='';
-  const empty=$('empty');
-  const d=document.createElement('div');d.id='empty';
-  d.innerHTML=`
-    <div class="radar"><div class="beam"></div><div class="core"></div></div>
-    <h2>چت جدید آماده است</h2>
-    <p>حافظهٔ <b>ایزولهٔ این پروژه</b> بارگذاری شد ▊</p>`;
-  stream.appendChild(d);
+  /* چت جدید: استریم خالی می‌شود (حافظهٔ ایزولهٔ پروژهٔ تازه/سوییچ‌شده) */
+  stream.innerHTML=heroHTML('چت جدید آماده است','حافظهٔ <b>ایزولهٔ این پروژه</b> بارگذاری شد.');
+  $('rounds').style.display='none';
+  switchView('chat');
 }
 $('projNameInput')?.addEventListener('keydown',e=>{if(e.key==='Enter')createProject()});
 
-/* ── توکن ─────────────────────────────────────────────────────── */
+/* ── سشن‌ها ────────────────────────────────────────────────────── */
+async function loadSessions(){
+  try{
+    const r=await fetch('/api/sessions');const j=await r.json();
+    if(j.ok)renderSessions(j.sessions,j.active_id);
+  }catch(e){}
+}
+function renderSessions(items,activeId){
+  const bar=$('sessTabs');if(!bar)return;
+  window.__sessMap={};(items||[]).forEach(s=>{window.__sessMap[s.id]=s.title;});
+  bar.innerHTML=(items||[]).map(s=>`
+    <span class="sess-tab ${s.id===activeId?'active':''}" onclick="selectSession(${s.id})" ondblclick="renameSession(${s.id})">
+      ${esc(s.title)} <span class="cnt">${s.task_count||0}</span>
+    </span>`).join('');
+}
+async function selectSession(id){
+  const r=await fetch('/api/sessions/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+  const j=await r.json();
+  if(j.ok){toast('ok',`سشن «${esc(j.session.title)}» فعال شد`);startNewChatView();loadSessions();}
+  else toast('err','⛔ '+esc(j.error||'سوییچ سشن ناموفق'));
+}
+async function createSession(){
+  const r=await fetch('/api/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+  const j=await r.json();
+  if(j.ok){toast('ok',`سشن «${esc(j.session.title)}» ساخته شد`);startNewChatView();loadSessions();}
+}
+async function renameSession(id){
+  const old=(window.__sessMap||{})[id]||'';
+  const t=prompt('عنوان جدید سشن:',old);if(!t||t===old)return;
+  await fetch('/api/sessions/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,title:t})});
+  loadSessions();
+}
+
+/* ── تایید انسانی ──────────────────────────────────────────────── */
+function renderApprovalCard(p){
+  if(document.getElementById('appr-'+p.id))return;
+  const d=document.createElement('div');d.className='appr-card';d.id='appr-'+p.id;
+  d.innerHTML=`<h4><svg width="15" height="15"><use href="#i-warn"/></svg> تایید لازم است — ${esc(p.tool)}</h4>
+    <pre>${esc(JSON.stringify(p.arguments,null,1))}</pre>
+    <div style="display:flex;gap:8px">
+      <button class="btn sm solid" style="flex:1" onclick="resolveApproval('${p.id}',true)">تایید</button>
+      <button class="btn sm danger" style="flex:1" onclick="resolveApproval('${p.id}',false)">رد</button>
+    </div>`;
+  $('approvals').appendChild(d);
+  toast('info',`عملیات <b>${esc(p.tool)}</b> منتظر تایید توست`);
+}
+function clearApprovalCard(id){document.getElementById('appr-'+id)?.remove()}
+async function resolveApproval(id,approved){
+  const r=await fetch('/api/approvals/resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,approved})});
+  const j=await r.json();
+  if(!j.ok)toast('err','⛔ '+esc(j.error||'تعیین تکلیف ناموفق'));
+}
+async function loadApprovals(){
+  try{
+    const r=await fetch('/api/approvals');const j=await r.json();
+    (j.pending||[]).forEach(renderApprovalCard);
+  }catch(e){}
+}
+
+/* ── اعلان‌ها ──────────────────────────────────────────────────── */
+async function loadBell(){
+  try{
+    const r=await fetch('/api/notifications?unread=1');const j=await r.json();
+    const n=j.unread||0;const b=$('notifBadge');
+    b.classList.toggle('show',n>0);b.textContent=n>9?'9+':n;
+  }catch(e){}
+}
+function toggleNotif(){
+  const o=$('notifOverlay');
+  if(o.classList.contains('show')){closeOverlay('notifOverlay');return}
+  o.classList.add('show');loadNotifs();
+}
+async function loadNotifs(){
+  const r=await fetch('/api/notifications');const j=await r.json();
+  const items=j.items||[];
+  $('notifBody').innerHTML=items.length?items.map(i=>`
+    <div class="list-item" style="${i.read?'':'border-inline-start-color:var(--yellow)'}">
+      <div>${esc(i.title)}</div>
+      <div style="color:var(--faint);font-size:11.5px">${esc(i.body||'')}</div>
+      <span class="li-meta"><span>${esc(i.kind)}</span></span>
+    </div>`).join(''):'<div class="empty-note">اعلانی نیست.</div>';
+}
+async function markNotifsRead(){
+  await fetch('/api/notifications/read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+  loadNotifs();loadBell();
+}
+
+/* ── اتصال گیت‌هاب: ورود با مرورگر + توکن ──────────────────────── */
 async function submitToken(){
   const token=$('tokenInput').value.trim(),err=$('tokenErr'),modal=$('tokenModal'),btn=$('tokenSubmit');
   err.textContent='';
@@ -1045,7 +1535,7 @@ async function submitToken(){
     const r=await fetch('/api/token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});
     const j=await r.json();
     if(j.ok){
-      toast('ok',`✅ متصل شد به <b>${esc(j.login)}</b> — اسکوپ‌ها: ${esc(j.scopes||'')}`);
+      toast('ok',`متصل شد به <b>${esc(j.login)}</b> — اسکوپ‌ها: ${esc(j.scopes||'')}`);
       $('tokenOverlay').classList.remove('show');$('tokenInput').value='';
       loadState();loadGithub();
     }else{
@@ -1053,12 +1543,12 @@ async function submitToken(){
       modal.classList.remove('shake');void modal.offsetWidth;modal.classList.add('shake');
     }
   }catch(e){err.textContent='خطای ارتباط با سرور.'}
-  finally{btn.disabled=false;btn.textContent='✓ اعتبارسنجی و اتصال'}
+  finally{btn.disabled=false;btn.textContent='اعتبارسنجی و اتصال'}
 }
-function openTokenModal(){try{sessionStorage.removeItem('dxTokenSkip')}catch(_){/*حالت ذخیره‌سازی غیرفعال*/}$('tokenOverlay').classList.add('show')}
+function openTokenModal(){try{sessionStorage.removeItem('dxTokenSkip')}catch(_){}$('tokenOverlay').classList.add('show')}
 let ghPollTimer=null;
 function stopGhPoll(){if(ghPollTimer){clearInterval(ghPollTimer);ghPollTimer=null}}
-function closeTokenModal(){stopGhPoll();$('tokenOverlay').classList.remove('show');try{sessionStorage.setItem('dxTokenSkip','1')}catch(_){/*حالت ذخیره‌سازی غیرفعال*/}toast('info','بدون اتصال گیت‌هاب هم می‌توانی از حافظه/مهارت/ابزارهای داخلی استفاده کنی. برای اتصال بعدی روی چیپ GITHUB در هدر کلیک کن.')}
+function closeTokenModal(){stopGhPoll();$('tokenOverlay').classList.remove('show');try{sessionStorage.setItem('dxTokenSkip','1')}catch(_){}toast('info','بدون گیت‌هاب هم حافظه/مهارت/ابزارها کار می‌کنند — برای اتصال بعدی چیپ GitHub را بزن.')}
 /* ورود با مرورگر (Device Flow): کد می‌گیرد، کاربر در مرورگر لاگین‌شده تأیید می‌کند — بدون هیچ کلیدی */
 async function browserLogin(){
   const err=$('tokenErr');err.textContent='';stopGhPoll();
@@ -1087,7 +1577,7 @@ async function browserLogin(){
 }
 $('tokenInput')?.addEventListener('keydown',e=>{if(e.key==='Enter')submitToken()});
 
-/* ── دیپ‌سیک: ورود دستی / اتصال مجدد ─────────────────────────── */
+/* ── مغز: ورود دستی / اتصال مجدد / کلید API ───────────────────── */
 async function manualLogin(){
   const r=await fetch('/api/deepseek/login',{method:'POST'});const j=await r.json();
   toast('info',esc(j.message||'پنجرهٔ مرئی باز می‌شود'),6000);
@@ -1096,7 +1586,6 @@ async function reconnect(){
   await fetch('/api/deepseek/reconnect',{method:'POST'});
   toast('info','اتصال مجدد آغاز شد…');
 }
-/* مغز API: کلید سرویس سازگار با OpenAI را می‌گیرد و بدون مرورگر مغز را وصل می‌کند */
 async function setApiKey(){
   const key=prompt('کلید API سرویس (مثلاً sk-... از platform.deepseek.com):\nبرای ماندگاری می‌توانی همان را در .env هم بگذاری (AI_API_KEY=)');
   if(!key||!key.trim())return;
@@ -1108,372 +1597,226 @@ async function setApiKey(){
   else toast('err','کلید API پذیرفته نشد: '+(j.error||'خطای نامشخص'),8000);
 }
 
-/* ── ارسال تسک ───────────────────────────────────────────────── */
-function updateSend(){$('sendBtn').disabled=running||!$('taskInput').value.trim()||!$('chipDeepseek').classList.contains('on')}
-async function sendTask(){
-  const task=$('taskInput').value.trim();
-  if(!task||running)return;
-  try{
-    const r=await fetch('/api/task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task})});
-    const j=await r.json();
-    if(!j.ok){toast('err','⛔ '+esc(j.error||'شروع تسک ناموفق بود'));return}
-    $('taskInput').value='';autoGrow();updateSend();
-    $('empty')?.remove();
-    const pj=j.project;
-    const who=`تو · ${now()} <span class="proj-badge">PROJ #${pj?pj.id:'—'} ${pj?esc(pj.name):''}</span>`;
-    const c=card('user',who,'TASK');
-    c.innerHTML+=`<div class="txt">${esc(task)}</div>`;
-    stream.appendChild(c);c.scrollIntoView({behavior:'smooth',block:'end'});
-  }catch(e){toast('err','خطای شبکه: '+esc(e))}
-}
-$('taskInput').addEventListener('keydown',e=>{
-  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendTask()}
-});
-$('taskInput').addEventListener('input',autoGrow);
-
-/* ── اتصال SSE و هندل رویدادها ───────────────────────────────── */
-const es=new EventSource('/api/stream');
-es.onmessage=ev=>{
-  let m;try{m=JSON.parse(ev.data)}catch(_){return}
-  const e=m.event;
-  // رویدادهای replay (تاریخچهٔ ارسالی هنگام اتصال/اتصال‌مجدد SSE): فقط رویدادهای
-  // نوسازی وضعیت پردازش می‌شوند تا کارت/توست تکراری ساخته نشود
-  if(m.replay&&!['snapshot','deepseek_state','token_state','projects_updated','sessions_updated','notifications_updated','approvals_updated'].includes(e))return;
-  switch(e){
-    case 'snapshot': refreshAll(); break;
-    case 'deepseek_state': loadState(); break;
-    case 'token_state': loadState(); loadGithub();
-      toast('ok',`⬡ متصل: <b>${esc(m.login)}</b>`); break;
-    case 'task_start':
-      running=true;updateSend();renderRounds(0,m.max_rounds);
-      $('empty')?.remove();
-      if(m.project&&m.project.id!=null)toast('info',`🚀 تسک در پروژهٔ <b>#${m.project.id} ${esc(m.project.name||'')}</b> شروع شد`);
-      else toast('info','🚀 تسک شروع شد'); break;
-    case 'round': renderRounds(m.round,m.max_rounds); break;
-    case 'tool_call':
-      currentToolCard=addToolCard(m.tool,m.arguments,m.round);
-      if(m.tool==='save_memory'||m.tool==='save_skill')setTimeout(refreshAll,1200);
-      break;
-    case 'tool_result':
-      if(currentToolCard)settleToolCard(currentToolCard,m.ok,m.preview);
-      break;
-    case 'context':
-      if(m.memory||m.skills)toast('info','🧠 حافظه/مهارت مرتبط به پرامپت تزریق شد');
-      break;
-    case 'final':
-      running=false;finishRounds();updateSend();stopStreaming();typeFinal(m.answer,m.ok);break;
-    case 'answer_delta':
-      streamingCard(m.text);break;
-    case 'skill_learned':
-      toast('ok',`🧰 مهارت جدید (نسخهٔ ${m.version||1}): <b>${esc(m.name||'')}</b>`);loadSkills();break;
-    case 'lesson_learned':
-      toast('info',`📚 درس ثبت شد: ${esc((m.text||'').slice(0,90))}…`);loadMemory();break;
-    case 'reflection':
-      toast('info',`🪞 بازتاب ثبت شد: ${esc((m.text||'').slice(0,80))}…`);loadMemory();break;
-    case 'subtask_start':
-      toast('info',`🧩 زیرایجنت <b>${esc(m.role)}</b> شروع شد`);break;
-    case 'subtask_end':
-      toast(m.ok?'ok':'err',`🧩 زیرایجنت ${esc(m.role||'')} ${m.ok?'تمام شد':'ناتمام'} (${m.rounds||0} دور)`);break;
-    case 'checkpoint_saved':
-      toast('info',`💾 چک‌پوینت ذخیره شد (دور ${m.round})`,2600);break;
-    case 'chat_rollover':
-      toast('info',`🔄 <b>چرخش چت</b> — سقف context؛ چت جدید ساخته شد و راهنمای پروژه منتقل شد (تخمین ${m.est_tokens_before||'—'} توکن، دلیل: ${m.reason==='site_error'?'پیام سایت':'نزدیکِ سقف'})`,7000);break;
-    case 'approval_requested':
-      renderApprovalCard(m);break;
-    case 'approval_resolved':
-      clearApprovalCard(m.approval_id);
-      loadApprovals();
-      toast(m.approved?'ok':'err',m.approved?`✅ تایید شد: ${esc(m.tool)}`:`⛔ رد شد: ${esc(m.tool)}`);break;
-    case 'task_end':
-      running=false;finishRounds();updateSend();stopStreaming();refreshAll();
-      toast(m.ok?'ok':'err',m.ok?'✅ تسک تمام شد':'⚠️ تسک با مشکل تمام شد');
-      break;
-    case 'memory_updated': refreshAll(); break;
-    case 'sessions_updated': renderSessions(m.sessions,m.active_id); break;
-    case 'schedule_fired': loadDash(); break;
-    case 'watch_changed': loadDash(); break;
-    case 'snapshot_created': case 'snapshot_restored': loadDash(); break;
-    case 'project_created':
-      toast('ok',`📁 پروژهٔ «<b>${esc(m.project.name)}</b>» ثبت شد — آیدی <b>${m.project.id}</b> (خودکار)`);break;
-    case 'project_switched':
-      toast('ok',`🎯 پروژهٔ فعال: <b>#${m.project.id} ${esc(m.project.name)}</b> — حافظهٔ ایزوله`);break;
-    case 'project_deleted':
-      toast('info',`🗑 پروژهٔ «${esc(m.deleted.name)}» حذف شد`);break;
-    case 'projects_updated': refreshAll(); break;
-  }
-};
-es.onerror=()=>{ /* EventSource خودش reconnect می‌کند */ };
-
-function refreshAll(){loadState();loadMemory();loadSkills();loadGithub();loadSessions();loadApprovals();loadDash();loadBell();}
-
-/* ═════════════════ v4: سشن‌ها / اعلان‌ها / تایید / داشبورد / استریم ═════════════════ */
-
-/* ── سشن‌ها ───────────────────────────────────────────────────── */
-async function loadSessions(){
-  try{
-    const r=await fetch('/api/sessions');const j=await r.json();
-    if(j.ok)renderSessions(j.sessions,j.active_id);
-  }catch(e){}
-}
-function renderSessions(items,activeId){
-  const bar=$('sessTabs');if(!bar)return;
-  window.__sessMap={};(items||[]).forEach(s=>{window.__sessMap[s.id]=s.title;});
-  bar.innerHTML=(items||[]).map(s=>`
-    <span class="sess-tab ${s.id===activeId?'active':''}" onclick="selectSession(${s.id})" ondblclick="renameSession(${s.id})">
-      ${esc(s.title)} <span class="cnt">${s.task_count||0}</span>
-    </span>`).join('');
-}
-async function selectSession(id){
-  const r=await fetch('/api/sessions/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
-  const j=await r.json();
-  if(j.ok){toast('ok',`💬 سشن «${esc(j.session.title)}» فعال شد`);startNewChatView();loadSessions();}
-  else toast('err','⛔ '+esc(j.error||'سوییچ سشن ناموفق'));
-}
-async function createSession(){
-  const r=await fetch('/api/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
-  const j=await r.json();
-  if(j.ok){toast('ok',`💬 سشن «${esc(j.session.title)}» ساخته شد (آیدی ${j.session.id})`);startNewChatView();loadSessions();}
-}
-async function renameSession(id){
-  const old=(window.__sessMap||{})[id]||'';
-  const t=prompt('عنوان جدید سشن:',old);if(!t||t===old)return;
-  await fetch('/api/sessions/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,title:t})});
-  loadSessions();
-}
-
-/* ── استریم جزئی پاسخ ─────────────────────────────────────────── */
-let streamCardEl=null;
-function streamingCard(text){
-  $('empty')?.remove();
-  if(!streamCardEl){
-    streamCardEl=card('final','DevX','STREAMING');
-    const txt=document.createElement('div');txt.className='txt';
-    streamCardEl.appendChild(txt);stream.appendChild(streamCardEl);
-  }
-  streamCardEl.querySelector('.txt').innerHTML=md(text||'')+'<span class="caret"></span>';
-  streamCardEl.scrollIntoView({behavior:'smooth',block:'end'});
-}
-function stopStreaming(){if(streamCardEl){streamCardEl.remove();streamCardEl=null;}}
-
-/* ── تایید انسانی ─────────────────────────────────────────────── */
-function renderApprovalCard(p){
-  if(document.getElementById('appr-'+p.id))return;
-  const d=document.createElement('div');d.className='appr-card';d.id='appr-'+p.id;
-  d.innerHTML=`<h4>⚠️ تایید لازم است — ${esc(p.tool)}</h4>
-    <pre>${esc(JSON.stringify(p.arguments,null,1))}</pre>
-    <div class="row">
-      <button class="btn" onclick="resolveApproval('${p.id}',true)">✓ تایید</button>
-      <button class="btn ghost" onclick="resolveApproval('${p.id}',false)">✗ رد</button>
-    </div>`;
-  $('approvals').appendChild(d);
-  toast('info',`⚠️ عملیات <b>${esc(p.tool)}</b> منتظر تایید توست`);
-}
-function clearApprovalCard(id){document.getElementById('appr-'+id)?.remove()}
-async function resolveApproval(id,approved){
-  const r=await fetch('/api/approvals/resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,approved})});
-  const j=await r.json();
-  if(!j.ok)toast('err','⛔ '+esc(j.error||'تعیین تکلیف ناموفق'));
-}
-async function loadApprovals(){
-  try{
-    const r=await fetch('/api/approvals');const j=await r.json();
-    (j.pending||[]).forEach(renderApprovalCard);
-  }catch(e){}
-}
-
-/* ── اعلان‌ها ─────────────────────────────────────────────────── */
-async function loadBell(){
-  try{
-    const r=await fetch('/api/notifications?unread=1');const j=await r.json();
-    const n=j.unread||0;
-    const b=$('notifBadge');
-    b.style.display=n>0?'flex':'none';b.textContent=n>9?'9+':n;
-  }catch(e){}
-}
-function toggleNotif(){
-  const o=$('notifOverlay');
-  if(o.classList.contains('show')){closeOverlay('notifOverlay');return}
-  o.classList.add('show');loadNotifs();
-}
-async function loadNotifs(){
-  const r=await fetch('/api/notifications');const j=await r.json();
-  const items=j.items||[];
-  $('notifBody').innerHTML=items.length?items.map(i=>`
-    <div class="line-item" style="border-color:var(--line);margin-bottom:6px;${i.read?'':'border-color:rgba(255,210,63,.45)'}">
-      <span style="flex:1">${esc(i.title)}<br><small style="color:var(--faint)">${esc(i.body||'')}</small></span>
-      <span class="badge2">${i.kind}</span>
-    </div>`).join(''):'<div class="mem-item">اعلانی نیست.</div>';
-}
-async function markNotifsRead(){
-  await fetch('/api/notifications/read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
-  loadNotifs();loadBell();
-}
-
-/* ── داشبورد اتوماسیون ────────────────────────────────────────── */
+/* ── اتوماسیون: زمان‌بند / نگهبان / ممیزی / چک‌پوینت ──────────── */
 let dashSec='sched';
-function dashTab(el){
-  document.querySelectorAll('.dash-tab').forEach(t=>t.classList.remove('active'));
-  el.classList.add('active');dashSec=el.dataset.d;loadDash();
+function autoTab(el){
+  document.querySelectorAll('#view-auto .tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');dashSec=el.dataset.d;loadAuto();
 }
-async function loadDash(){
-  const body=$('dashBody');if(!body)return;
+async function loadAuto(){
+  const body=$('autoBody');if(!body)return;
   try{
     if(dashSec==='sched'){
       const r=await fetch('/api/schedule');const j=await r.json();const jobs=j.jobs||[];
-      $('dashCnt').textContent=jobs.length;
+      $('autoCnt').textContent=jobs.length;
+      setBadges('Auto',jobs.length);
       body.innerHTML=`
         <div class="mini-form">
           <input id="jobTask" placeholder="تسک خودکار…">
-          <select id="jobKind" style="flex:0 0 88px"><option value="interval">هر X ثانیه</option><option value="daily">ساعت روز</option></select>
-          <input id="jobVal" placeholder="3600 / 09:00" style="flex:0 0 110px;direction:ltr">
-          <button class="btn" onclick="addJob()">＋</button>
+          <select id="jobKind" style="flex:0 0 120px"><option value="interval">هر X ثانیه</option><option value="daily">ساعت روز</option></select>
+          <input id="jobVal" placeholder="3600 / 09:00" style="flex:0 0 120px;direction:ltr">
+          <button class="btn sm" style="flex:0 0 auto" onclick="addJob()">افزودن</button>
         </div>` +
         (jobs.length?jobs.map(j=>`
-          <div class="line-item" style="border-color:var(--line);margin-bottom:6px">
-            <span style="flex:1">⏰ <b>${esc(j.name)}</b><br><small style="color:var(--faint)">${esc(j.task||'')} · ${j.kind==='daily'?('at '+esc(j.at)):('every '+j.every_s+'s')} · runs:${j.run_count||0}</small></span>
-            <button class="li-del" onclick="delJob(${j.id})">حذف</button>
-          </div>`).join(''):'<div class="mem-item">jobی تعریف نشده.</div>');
+          <div class="list-item">
+            <b>${esc(j.name)}</b>
+            <span class="li-meta"><span>${esc(j.task||'')}</span><span>${j.kind==='daily'?('at '+esc(j.at)):('every '+j.every_s+'s')}</span><span>runs: ${j.run_count||0}</span></span>
+            <button class="x-btn" style="margin-top:8px" onclick="delJob(${j.id})">حذف</button>
+          </div>`).join(''):'<div class="empty-note">jobی تعریف نشده.</div>');
     }else if(dashSec==='watch'){
       const r=await fetch('/api/watch');const j=await r.json();const ws=j.watches||[];
-      $('dashCnt').textContent=ws.length;
+      $('autoCnt').textContent=ws.length;
       body.innerHTML=`
         <div class="mini-form">
           <input id="watchRepo" placeholder="owner/repo" style="direction:ltr">
           <input id="watchAuto" placeholder="تسک خودکار؟ ({{change}})">
-          <button class="btn" onclick="addWatch()">＋</button>
+          <button class="btn sm" style="flex:0 0 auto" onclick="addWatch()">افزودن</button>
         </div>` +
         (ws.length?ws.map(w=>`
-          <div class="line-item" style="border-color:var(--line);margin-bottom:6px">
-            <span style="flex:1">👀 <b>${esc(w.repo)}</b><br><small style="color:var(--faint)">${w.events.join(' · ')} · هر ${w.interval_s}s</small></span>
-            <button class="li-del" onclick="delWatch(${w.id})">حذف</button>
-          </div>`).join(''):'<div class="mem-item">مخزنی زیر نظر نیست (توکن لازم است).</div>');
+          <div class="list-item">
+            <b style="font-family:var(--mono);direction:ltr;display:inline-block">${esc(w.repo)}</b>
+            <span class="li-meta"><span>${w.events.join(' · ')}</span><span>every ${w.interval_s}s</span></span>
+            <button class="x-btn" style="margin-top:8px" onclick="delWatch(${w.id})">حذف</button>
+          </div>`).join(''):'<div class="empty-note">مخزنی زیر نظر نیست (اتصال گیت‌هاب لازم است).</div>');
     }else if(dashSec==='audit'){
       const r=await fetch('/api/audit?verify=1');const v=await r.json();
       const r2=await fetch('/api/audit?limit=40');const j=await r2.json();const items=j.entries||[];
-      $('dashCnt').textContent=v.entries;
-      body.innerHTML=`<div class="mem-item ${v.ok?'':'lesson'}">
-          زنجیرهٔ هش: <b class="${v.ok?'verify-ok':'verify-bad'}">${v.ok?'✓ سالم و دست‌نخورده':'✗ دستکاری‌شده (خط '+v.broken_at+')'}</b>
-          · ${v.entries} رویداد</div>` +
-        items.map(e=>`
-          <div class="tl-item"><span class="tk">${esc(e.event)}</span>
-            <span class="tt">${esc(JSON.stringify(e.data||{})).slice(0,80)}</span>
-            <span class="td">${esc((e.ts||'').slice(11,19))}</span></div>`).join('');
-    }else if(dashSec==='usage'){
-      const r=await fetch('/api/usage?days=14');const j=await r.json();
-      const t=j.totals||{},tr=j.trend||[];
-      const maxTok=Math.max(1,...tr.map(d=>d.est_tokens));
-      $('dashCnt').textContent=t.tasks||0;
-      body.innerHTML=`<div class="mem-item">تسک‌ها: <b>${t.tasks||0}</b> · دورها: <b>${t.rounds||0}</b> · ابزار: <b>${t.tool_calls||0}</b> · توکن تخمینی: <b style="direction:ltr;display:inline-block">~${(t.est_tokens_in||0)+(t.est_tokens_out||0)}</b> · زمان: <b>${Math.round(t.duration_s||0)}s</b></div>`
-        + tr.slice(-10).map(d=>`
-          <div class="tl-item"><span class="tk">${d.date.slice(5)}</span>
-            <span class="tt" style="flex:1"><span class="usage-bar"><i style="width:${Math.round(100*d.est_tokens/maxTok)}%"></i></span></span>
-            <span class="td">${d.tasks}T/${d.est_tokens}tok</span></div>`).join('');
-    }else if(dashSec==='timeline'){
-      const r=await fetch('/api/timeline');const j=await r.json();
-      if(!j.ok){body.innerHTML='<div class="mem-item">پروژه‌ای فعال نیست.</div>';return}
-      const ev=j.events||[];$('dashCnt').textContent=ev.length;
-      body.innerHTML=ev.length?ev.map(e=>`
-        <div class="tl-item"><span class="tk">${esc(e.kind)}</span>
-          <span class="tt">${esc(e.text||'')}</span>
-          <span class="td">${esc((e.ts||'').slice(5,16))}</span></div>`).join(''):'<div class="mem-item">خط زمانی خالی است.</div>';
+      $('autoCnt').textContent=v.entries;
+      body.innerHTML=`<div class="list-item ${v.ok?'task-ok':'task-fail'}">
+          زنجیرهٔ هش: <b class="${v.ok?'audit-badge-ok':'audit-badge-bad'}">${v.ok?'سالم و دست‌نخورده':'دستکاری‌شده (خط '+v.broken_at+')'}</b> · ${v.entries} رویداد
+        </div>` +
+        (items.length?`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px">
+          ${items.map(e=>`<tr style="border-bottom:1px solid var(--line)">
+            <td style="padding:7px 8px;font-family:var(--mono);font-size:9.5px;color:var(--teal);direction:ltr;white-space:nowrap">${esc(e.event)}</td>
+            <td style="padding:7px 8px;color:var(--muted)">${esc(JSON.stringify(e.data||{})).slice(0,90)}</td>
+            <td style="padding:7px 8px;font-family:var(--mono);font-size:9px;color:var(--faint);direction:ltr;white-space:nowrap">${esc((e.ts||'').slice(11,19))}</td>
+          </tr>`).join('')}
+        </table></div>`:'<div class="empty-note">رویدادی ثبت نشده.</div>');
     }else if(dashSec==='ckpt'){
       const r=await fetch('/api/checkpoints');const j=await r.json();const cps=j.checkpoints||[];
-      $('dashCnt').textContent=cps.length;
+      $('autoCnt').textContent=cps.length;
       body.innerHTML=cps.length?cps.map(c=>`
-        <div class="line-item" style="border-color:var(--line);margin-bottom:6px">
-          <span style="flex:1">💾 <b>${esc((c.task||'').slice(0,50))}</b><br>
-          <small style="color:var(--faint)">R${c.round} · ${esc(c.status)} · پروژهٔ #${(c.project||{}).id}</small></span>
-          <button class="btn ghost" style="padding:4px 10px;font-size:10px" onclick="resumeTask('${c.id}')">↻ ادامه</button>
-        </div>`).join(''):'<div class="mem-item">چک‌پوینتی نیست — در پایان هر دور ذخیره می‌شود.</div>';
+        <div class="list-item">
+          <b>${esc((c.task||'').slice(0,60))}</b>
+          <span class="li-meta"><span>R${c.round}</span><span>${esc(c.status)}</span><span>proj #${(c.project||{}).id}</span></span>
+          <button class="btn ghost sm" style="margin-top:8px" onclick="resumeTask('${c.id}')">ادامه از همین‌جا</button>
+        </div>`).join(''):'<div class="empty-note">چک‌پوینتی نیست — در پایان هر دور ذخیره می‌شود.</div>';
     }
-  }catch(e){console.warn('dash load failed',e)}
+  }catch(e){console.warn('auto load failed',e)}
 }
+function loadDash(){loadAuto();loadUsage();loadTimeline()}
 async function addJob(){
   const task=$('jobTask').value.trim(),kind=$('jobKind').value,val=$('jobVal').value.trim();
   if(!task||!val){toast('err','تسک و مقدار را وارد کن');return}
   const payload=kind==='interval'?{kind,task,every_s:parseInt(val)||3600,name:task.slice(0,30)}:{kind,task,at:val,name:task.slice(0,30)};
   const r=await fetch('/api/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   const j=await r.json();
-  if(j.ok){toast('ok','⏰ job ثبت شد — سر موعد خودکار اجرا می‌شود');loadDash();}
+  if(j.ok){toast('ok','job ثبت شد — سر موعد خودکار اجرا می‌شود');loadAuto();}
   else toast('err','⛔ '+esc(j.error||''));
 }
-async function delJob(id){await fetch('/api/schedule/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});loadDash();}
+async function delJob(id){await fetch('/api/schedule/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});loadAuto();}
 async function addWatch(){
   const repo=$('watchRepo').value.trim(),auto=$('watchAuto').value.trim();
   if(!repo){toast('err','owner/repo را وارد کن');return}
   const r=await fetch('/api/watch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({repo,auto_task:auto})});
   const j=await r.json();
-  if(j.ok){toast('ok','👀 مخزن زیر نظر رفت — تغییرها اعلان می‌شوند');loadDash();}
+  if(j.ok){toast('ok','مخزن زیر نظر رفت — تغییرها اعلان می‌شوند');loadAuto();}
   else toast('err','⛔ '+esc(j.error||''));
 }
-async function delWatch(id){await fetch('/api/watch/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});loadDash();}
+async function delWatch(id){await fetch('/api/watch/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});loadAuto();}
 async function resumeTask(cp){
   const r=await fetch('/api/resume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({checkpoint_id:cp})});
   const j=await r.json();
-  toast(j.ok?'ok':'err',j.ok?'↻ ادامهٔ تسک از چک‌پوینت آغاز شد':'⛔ '+esc(j.error||''));
+  toast(j.ok?'ok':'err',j.ok?'ادامهٔ تسک از چک‌پوینت آغاز شد':'⛔ '+esc(j.error||''));
+  if(j.ok)switchView('chat');
 }
 
-/* ── Persona / Snapshot / Bundle / Risky ──────────────────────── */
-function openOverlay(id){$(id).classList.add('show')}
-function closeOverlay(id){$(id).classList.remove('show')}
-async function openPersona(){
-  const st=await (await fetch('/api/state')).json();
-  $('personaInput').value=(st.project&&st.project.active&&st.project.active.persona)||'';
-  openOverlay('personaOverlay');
+/* ── مصرف: آمار + نمودار SVG ───────────────────────────────────── */
+async function loadUsage(){
+  try{
+    const r=await fetch('/api/usage?days=14');const j=await r.json();
+    const t=j.totals||{},tr=j.trend||[];
+    const tot=(t.est_tokens_in||0)+(t.est_tokens_out||0);
+    $('usageStats').innerHTML=`
+      <div class="stat accent"><span class="s-lbl">تسک‌ها</span><span class="s-val">${t.tasks||0}</span></div>
+      <div class="stat"><span class="s-lbl">دورها</span><span class="s-val">${t.rounds||0}</span></div>
+      <div class="stat"><span class="s-lbl">فراخوانی ابزار</span><span class="s-val">${t.tool_calls||0}</span></div>
+      <div class="stat warn"><span class="s-lbl">توکن تخمینی</span><span class="s-val">~${fmt(tot)}</span></div>
+      <div class="stat"><span class="s-lbl">زمان اجرا</span><span class="s-val">${Math.round(t.duration_s||0)}<small> s</small></span></div>`;
+    renderUsageChart(tr);
+    /* خلاصهٔ ممیزی */
+    try{
+      const rv=await fetch('/api/audit?verify=1');const v=await rv.json();
+      $('usageAudit').innerHTML=`<div class="list-item ${v.ok?'task-ok':'task-fail'}">زنجیرهٔ ممیزی: <b class="${v.ok?'audit-badge-ok':'audit-badge-bad'}">${v.ok?'سالم':'دستکاری‌شده'}</b> · ${v.entries} رویداد</div>`;
+    }catch(_){}
+  }catch(e){console.warn('usage load failed',e)}
+}
+function renderUsageChart(tr){
+  const svg=$('usageChart');if(!svg)return;
+  const data=tr.slice(-14);
+  if(!data.length){svg.innerHTML='<text class="g-label" x="280" y="95" text-anchor="middle" fill="#9aa4b8" font-size="11">هنوز داده‌ای ثبت نشده — با اولین تسک پر می‌شود</text>';return}
+  const W=560,H=190,pad=10,base=156,bh=132,n=data.length;
+  const maxTok=Math.max(1,...data.map(d=>d.est_tokens||0));
+  const slot=(W-2*pad)/n,bw=Math.max(5,slot-7);
+  let s='';
+  [0.25,0.5,0.75,1].forEach(f=>{const y=base-bh*f;
+    s+=`<line class="chart-grid-line" x1="0" x2="${W}" y1="${y}" y2="${y}"/>`});
+  data.forEach((d,i)=>{
+    const x=pad+i*slot+3;
+    const h=Math.max(2,bh*(d.est_tokens||0)/maxTok);
+    const y=base-h;
+    s+=`<g><title>${d.date} · ${d.tasks||0} تسک · ~${fmt(d.est_tokens)} توکن</title>
+      <rect class="g-bar" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="3" opacity="${i===n-1?1:.7}"/></g>`;
+    if(n<=8||i%2===0)s+=`<text class="g-label" x="${(x+bw/2).toFixed(1)}" y="${base+18}" text-anchor="middle">${d.date.slice(5)}</text>`;
+  });
+  s+=`<text class="g-label" x="${pad}" y="${base-bh-8}">max ~${fmt(maxTok)}</text>`;
+  svg.innerHTML=s;
+}
+
+/* ── خط زمانی ──────────────────────────────────────────────────── */
+async function loadTimeline(){
+  try{
+    const r=await fetch('/api/timeline');const j=await r.json();
+    const body=$('tlBody');if(!body)return;
+    if(!j.ok){body.innerHTML='<div class="empty-note">پروژه‌ای فعال نیست.</div>';return}
+    const ev=j.events||[];
+    body.innerHTML=ev.length?ev.map(e=>`
+      <div class="tl-item">
+        <div class="tl-txt">${esc(e.text||'')}</div>
+        <div class="tl-meta"><span>${esc(e.kind)}</span><span>${esc((e.ts||'').slice(5,16))}</span></div>
+      </div>`).join(''):'<div class="empty-note">خط زمانی خالی است.</div>';
+  }catch(e){console.warn('timeline load failed',e)}
+}
+
+/* ── تنظیمات ───────────────────────────────────────────────────── */
+function curActiveId(){try{return JSON.parse(window.__lastState||'null')?.project?.active?.id}catch(e){return null}}
+async function loadSettings(){
+  try{
+    const st=await (await fetch('/api/state')).json();
+    $('personaInput').value=(st.project&&st.project.active&&st.project.active.persona)||'';
+  }catch(e){}
+  loadSnapshots();loadBundles();
 }
 async function savePersona(){
   const r=await fetch('/api/persona',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({id:(curActiveId()||0),persona:$('personaInput').value})});
   const j=await r.json();
-  if(j.ok){toast('ok','🎭 persona ذخیره شد — از تسک بعدی اعمال می‌شود');closeOverlay('personaOverlay');loadState();}
-  else toast('err','⛔ '+esc(j.error||''));
+  if(j.ok){toast('ok','persona ذخیره شد — از تسک بعدی اعمال می‌شود');loadState();}
+  else $('personaErr').textContent=j.error||'';
 }
-function curActiveId(){try{return JSON.parse(window.__lastState||'null')?.project?.active?.id}catch(e){return null}}
-async function openSnapshots(){
-  openOverlay('snapOverlay');
-  const r=await fetch('/api/snapshots');const j=await r.json();
-  const items=j.snapshots||[];
-  $('snapList').innerHTML=items.length?items.map(s=>`
-    <div class="line-item" style="border-color:var(--line);margin-bottom:6px">
-      <span style="flex:1">💾 <b>${esc(s.label||s.id)}</b><br><small style="color:var(--faint)">${esc(s.created)} · ${s.files} فایل</small></span>
-      <button class="btn ghost" style="padding:4px 10px;font-size:10px" onclick="restoreSnapshot('${esc(s.id).replace(/'/g,"")}')">↻ رول‌بک</button>
-    </div>`).join(''):'<div class="mem-item">هنوز snapshotای گرفته نشده.</div>';
+async function loadSnapshots(){
+  const el=$('snapList');if(!el)return;
+  try{
+    const r=await fetch('/api/snapshots');const j=await r.json();
+    const items=j.snapshots||[];
+    el.innerHTML=items.length?items.map(s=>`
+      <div class="list-item">
+        <b>${esc(s.label||s.id)}</b>
+        <span class="li-meta"><span>${esc(s.created)}</span><span>${s.files} files</span></span>
+        <button class="btn ghost sm" style="margin-top:8px" onclick="restoreSnapshot('${esc(s.id).replace(/'/g,'')}')">رول‌بک</button>
+      </div>`).join(''):'<div class="empty-note">هنوز snapshotای گرفته نشده.</div>';
+  }catch(e){}
 }
 async function createSnapshot(){
   const label=$('snapLabel').value.trim()||'snapshot';
   const r=await fetch('/api/snapshots/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({label})});
   const j=await r.json();
-  if(j.ok){toast('ok',`💾 snapshot «${esc(label)}» گرفته شد (${j.files} فایل)`);$('snapLabel').value='';openSnapshots();}
+  if(j.ok){toast('ok',`snapshot «${esc(label)}» گرفته شد (${j.files} فایل)`);$('snapLabel').value='';loadSnapshots();}
   else toast('err','⛔ '+esc(j.error||''));
 }
 async function restoreSnapshot(id){
   if(!confirm('رول‌بک به این snapshot؟ (وضعیت فعلی خودکار snapshot می‌شود)'))return;
   const r=await fetch('/api/snapshots/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
   const j=await r.json();
-  if(j.ok){toast('ok',`↻ رول‌بک شد (${j.restored} فایل)`);refreshAll();openSnapshots();}
+  if(j.ok){toast('ok',`رول‌بک شد (${j.restored} فایل)`);refreshAll();loadSnapshots();}
   else toast('err','⛔ '+esc(j.error||''));
 }
-async function openBundle(){
-  openOverlay('bundleOverlay');
-  const r=await fetch('/api/exports');const j=await r.json();
-  const items=j.exports||[];
-  $('bundleList').innerHTML=items.length?items.map(x=>`
-    <div class="line-item" style="border-color:var(--line);margin-bottom:6px">
-      <span style="flex:1">📦 <b>${esc(x.project_name||x.name)}</b><br><small style="color:var(--faint)">${esc(x.exported_at||'')}</small></span>
-      <a class="badge2" href="/api/exports/download?file=${encodeURIComponent(x.name)}" style="text-decoration:none">DL</a>
-      <button class="btn ghost" style="padding:4px 10px;font-size:10px" onclick="importBundle('${encodeURIComponent(x.name)}')">↗ import</button>
-    </div>`).join(''):'<div class="mem-item">بسته‌ای نیست — اول export بگیر.</div>';
+async function loadBundles(){
+  const el=$('bundleList');if(!el)return;
+  try{
+    const r=await fetch('/api/exports');const j=await r.json();
+    const items=j.exports||[];
+    el.innerHTML=items.length?items.map(x=>`
+      <div class="list-item">
+        <b>${esc(x.project_name||x.name)}</b>
+        <span class="li-meta"><span>${esc(x.exported_at||'')}</span></span>
+        <span style="display:flex;gap:6px;margin-top:8px">
+          <a class="btn ghost sm" href="/api/exports/download?file=${encodeURIComponent(x.name)}" style="text-decoration:none">دانلود</a>
+          <button class="btn ghost sm" onclick="importBundle('${encodeURIComponent(x.name)}')">import</button>
+        </span>
+      </div>`).join(''):'<div class="empty-note">بسته‌ای نیست — اول export بگیر.</div>';
+  }catch(e){}
 }
 async function exportProject(){
   const r=await fetch('/api/export',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
   const j=await r.json();
-  if(j.ok){toast('ok',`📦 بسته ساخته شد: ${esc(j.name)} (${j.files} فایل)`);openBundle();}
+  if(j.ok){toast('ok',`بسته ساخته شد: ${esc(j.name)} (${j.files} فایل)`);loadBundles();}
   else toast('err','⛔ '+esc(j.error||''));
 }
 async function importBundle(name){
   const r=await fetch('/api/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:decodeURIComponent(name)})});
   const j=await r.json();
-  if(j.ok){toast('ok',`↗ به‌عنوان پروژهٔ «${esc(j.project.name)}» با آیدی ${j.project.id} وارد شد`);refreshAll();closeOverlay('bundleOverlay');}
+  if(j.ok){toast('ok',`به‌عنوان پروژهٔ «${esc(j.project.name)}» با آیدی ${j.project.id} وارد شد`);refreshAll();}
   else toast('err','⛔ '+esc(j.error||''));
 }
 async function toggleDangerous(){
@@ -1484,38 +1827,48 @@ async function toggleDangerous(){
     body:JSON.stringify({id:active.id,allow_dangerous:!cur})});
   const j=await r.json();
   if(j.ok){
-    toast(j.settings.allow_dangerous?'err':'ok',j.settings.allow_dangerous?'⚠️ risky mode: ابزارهای خطرناک بدون تایید اجرا می‌شوند':'✅ risky mode خاموش — تایید انسانی فعال');
+    $('riskySwitch').classList.toggle('on',!!j.settings.allow_dangerous);
+    toast(j.settings.allow_dangerous?'err':'ok',j.settings.allow_dangerous?'حالت پرخطر روشن — ابزارهای خطرناک بدون تایید اجرا می‌شوند':'حالت پرخطر خاموش — تایید انسانی فعال');
     loadState();
   }
 }
+/* سازگاری: دکمه‌های قدیمی به نمای تنظیمات می‌روند */
+function openPersona(){switchView('settings')}
+function openSnapshots(){switchView('settings')}
+function openBundle(){switchView('settings')}
+function openNewChat(){switchView('projects');$('projNameInput')?.focus()}
+function openOverlay(id){$(id).classList.add('show')}
+function closeOverlay(id){$(id).classList.remove('show')}
 
-/* ── Cmd+K پالت ───────────────────────────────────────────────── */
+/* ── پالت ⌘K ───────────────────────────────────────────────────── */
 function openPalette(){openOverlay('paletteOverlay');$('paletteInput').value='';$('paletteInput').focus();
-  $('paletteBody').innerHTML='<div class="mem-item">برای جستجو تایپ کن و Enter بزن…</div>';}
+  $('paletteBody').innerHTML='<div class="empty-note">برای جستجو تایپ کن و Enter بزن…</div>';}
 $('paletteInput')?.addEventListener('keydown',async e=>{
   if(e.key!=='Enter')return;
   const q=$('paletteInput').value.trim();if(!q)return;
   const r=await fetch('/api/search?q='+encodeURIComponent(q));const j=await r.json();
   const items=j.results||[];
   $('paletteBody').innerHTML=items.length?items.map(x=>`
-    <div class="mem-item" onclick="jumpToProject(${x.project_id})">
-      <span class="badge2">${esc(x.kind)}</span> ${esc(x.text||'')}
-      <br><small style="color:var(--faint)">پروژهٔ #${x.project_id} ${esc(x.project_name||'')} · score ${x.score}</small>
-    </div>`).join(''):'<div class="mem-item">چیزی پیدا نشد.</div>';
+    <div class="list-item" style="cursor:pointer" onclick="jumpToProject(${x.project_id})">
+      <span class="tag public" style="margin-inline-end:6px">${esc(x.kind)}</span> ${esc(x.text||'')}
+      <span class="li-meta"><span>پروژهٔ #${x.project_id} ${esc(x.project_name||'')}</span><span>score ${x.score}</span></span>
+    </div>`).join(''):'<div class="empty-note">چیزی پیدا نشد.</div>';
 });
 async function jumpToProject(pid){
   const r=await fetch('/api/projects/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:pid})});
   const j=await r.json();
-  if(j.ok){toast('ok',`🎯 پرش به پروژهٔ #${pid}`);closeOverlay('paletteOverlay');refreshAll();}
+  if(j.ok){toast('ok',`پرش به پروژهٔ #${pid}`);closeOverlay('paletteOverlay');refreshAll();}
 }
 document.addEventListener('keydown',e=>{
   if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();openPalette();}
-  if(e.key==='Escape'){['paletteOverlay','notifOverlay','personaOverlay','snapOverlay','bundleOverlay'].forEach(id=>$(id)?.classList.remove('show'));}
+  if(e.key==='Escape'){['paletteOverlay','notifOverlay'].forEach(id=>$(id)?.classList.remove('show'));}
 });
 
-/* ── شروع ─────────────────────────────────────────────────────── */
+/* ── شروع ──────────────────────────────────────────────────────── */
+stream.innerHTML=heroHTML();
 refreshAll();
 updateSend();
+
 </script>
 </body>
 </html>

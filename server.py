@@ -58,6 +58,21 @@ from webhooks import WebhookWatcher
 UI_FILE = Path(__file__).resolve().parent / "ui" / "index.html"
 
 
+def short_error(e: BaseException, max_chars: int = 200) -> str:
+    """خلاصهٔ کوتاه و قابل‌نمایش از یک خطا برای پیام وضعیت UI.
+
+    استثناهای Playwright کل لاگ مرورگر (چند کیلوبایت متن فنی LTR) را داخل
+    str(e) می‌آورند؛ فقط خطِ اولِ معنادار (پیام اصلی خطا) را نگه می‌داریم و
+    تا ۲۰۰ نویسه محدود می‌کنیم تا نوار هشدار/UI را نگیرند. متن کامل در لاگ
+    ترمینال سرور می‌ماند.
+    """
+    text = str(e).strip() or e.__class__.__name__
+    first = next((ln.strip() for ln in text.splitlines() if ln.strip()), text)
+    if len(first) > max_chars:
+        first = first[: max_chars - 1].rstrip() + "…"
+    return first
+
+
 class DevXState:
     """وضعیت مشترک سرور v4: پروژه‌ها، سشن‌ها، موتورها، مغز، زیرساخت‌ها."""
 
@@ -399,8 +414,8 @@ class DevXState:
                         self._apply_api_brain()
                         return
                     except APIError as e:
-                        self.deepseek_message = str(e)
-                        self.bus.emit("deepseek_state", ready=False, error=str(e))
+                        self.deepseek_message = short_error(e)
+                        self.bus.emit("deepseek_state", ready=False, error=self.deepseek_message)
                         return
                 try:
                     if self.client is not None:
@@ -421,8 +436,8 @@ class DevXState:
                     self.client.start()
                     self.deepseek_started = True
                 except Exception as e:
-                    self.deepseek_message = f"خطا در راه‌اندازی مرورگر: {e}"
-                    self.bus.emit("deepseek_state", ready=False, error=str(self.deepseek_message))
+                    self.deepseek_message = f"خطا در راه‌اندازی مرورگر: {short_error(e)}"
+                    self.bus.emit("deepseek_state", ready=False, error=self.deepseek_message)
                     return
 
                 if self.client.is_logged_in():
@@ -438,7 +453,7 @@ class DevXState:
                     self.client.ensure_logged_in(wait_timeout=900)
                     self._mark_ready()
                 except Exception as e:
-                    self.deepseek_message = f"ورود انجام نشد: {e}"
+                    self.deepseek_message = f"ورود انجام نشد: {short_error(e)}"
                     self.bus.emit("deepseek_state", ready=False, login_required=True, message=self.deepseek_message)
 
         threading.Thread(target=connector, name="deepseek-connector", daemon=True).start()
