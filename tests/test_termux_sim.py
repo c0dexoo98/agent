@@ -52,7 +52,8 @@ except gt.GitHubUnavailableError as e:
     assert "PyGithub نصب نیست" in str(e), str(e)
 print("ok: بدون PyGithub — validate_token خطای واضح می‌دهد (نه ImportError)")
 
-import agent  # noqa: E402  — بدون PyGithub هم import می‌شود (import قدیمی حذف شد)
+import agent  # noqa: E402 — بدون PyGithub هم import می‌شود (import قدیمی حذف شد)
+assert agent.GITHUB_LIB is False, "پرچم GITHUB_LIB در agent دیده نشد"
 import threading  # noqa: E402
 import json  # noqa: E402
 import time  # noqa: E402
