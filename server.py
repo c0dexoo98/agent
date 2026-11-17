@@ -590,7 +590,11 @@ class DevXState:
         return res
 
     def project_import(self, zip_name: str) -> Dict[str, Any]:
-        path = (config.EXPORTS_DIR / str(zip_name)).resolve()
+        name = str(zip_name).strip()
+        # اعتبارسنجی قبل از ساخت مسیر (پاس ۶: نام غول‌پیکر → Errno 36؛ مسیردار → پیمایش)
+        if not name or len(name) > 200 or "/" in name or "\\" in name or ".." in name:
+            return {"ok": False, "error": "نام بسته نامعتبر است"}
+        path = (config.EXPORTS_DIR / name).resolve()
         if config.EXPORTS_DIR.resolve() not in path.parents or not path.exists():
             return {"ok": False, "error": "فایل بسته در exports یافت نشد"}
         res = bundles.import_project(path, self.projects, self.projects.memory_root, self.projects.skills_root)
@@ -833,27 +837,27 @@ class DevXHandler(BaseHTTPRequestHandler):
                 self._send_json(STATE.audit.verify())
             else:
                 self._send_json({"ok": True, "entries": STATE.audit.list(
-                    limit=int((qs.get("limit") or ["60"])[0]),
-                    project=int(qs["project"][0]) if "project" in qs else None,
+                    limit=_int_arg((qs.get("limit") or ["60"])[0], 60),
+                    project=_int_arg(qs["project"][0]) if "project" in qs else None,
                     event=(qs.get("event") or [None])[0],
                 )})
         elif path == "/api/usage":
-            self._send_json({"ok": True, **STATE.usage.summary(days=int((qs.get("days") or ["14"])[0]))})
+                self._send_json({"ok": True, **STATE.usage.summary(days=_int_arg((qs.get("days") or ["14"])[0], 14))})
         elif path == "/api/schedule":
             self._send_json({"ok": True, "jobs": STATE.scheduler.list(
-                project_id=int(qs["project"][0]) if "project" in qs else None)})
+                project_id=_int_arg(qs["project"][0]) if "project" in qs else None)})
         elif path == "/api/watch":
             self._send_json({"ok": True, "watches": STATE.watcher.list(
-                project_id=int(qs["project"][0]) if "project" in qs else None)})
+                project_id=_int_arg(qs["project"][0]) if "project" in qs else None)})
         elif path == "/api/search":
             kind = (qs.get("kind") or [None])[0]
-            pid = int(qs["project"][0]) if "project" in qs else None
+            pid = _int_arg(qs["project"][0]) if "project" in qs else None
             self._send_json(STATE.global_search((qs.get("q") or [""])[0], kind=kind, project_id=pid))
         elif path == "/api/timeline":
-            pid = int(qs["project"][0]) if "project" in qs else None
-            self._send_json(STATE.build_timeline(pid, limit=int((qs.get("limit") or ["80"])[0])))
+            pid = _int_arg(qs["project"][0]) if "project" in qs else None
+            self._send_json(STATE.build_timeline(pid, limit=_int_arg((qs.get("limit") or ["80"])[0], 80)))
         elif path == "/api/snapshots":
-            pid = int(qs["project"][0]) if "project" in qs else None
+            pid = _int_arg(qs["project"][0]) if "project" in qs else None
             rec = STATE.projects.get(pid) if pid else STATE.projects.active()
             if not rec or "error" in rec:
                 self._send_json({"ok": False, "error": "پروژه یافت نشد"})
@@ -895,7 +899,7 @@ class DevXHandler(BaseHTTPRequestHandler):
         elif path == "/api/task":
             self._send_json(STATE.start_task(
                 str(body.get("task", "")),
-                session_id=int(body["session_id"]) if body.get("session_id") else None,
+                session_id=_int_arg(body.get("session_id")) if body.get("session_id") else None,
             ))
         elif path == "/api/projects":
             self._send_json(STATE.create_project(str(body.get("name", ""))))
@@ -922,39 +926,39 @@ class DevXHandler(BaseHTTPRequestHandler):
             self._send_json(_safe_int_call(body, "id", STATE.delete_session))
         elif path == "/api/notifications/read":
             if body.get("id"):
-                self._send_json({"ok": STATE.notifications.mark_read(int(body["id"]))})
+                self._send_json({"ok": STATE.notifications.mark_read(_int_arg(body.get("id"), 0))})
             else:
                 self._send_json({"ok": True, "marked": STATE.notifications.mark_all_read()})
         elif path == "/api/approvals/resolve":
             self._send_json(STATE.resolve_approval(str(body.get("id", "")), bool(body.get("approved", False))))
         elif path == "/api/schedule":
             self._send_json(STATE.scheduler.add(
-                project_id=int(body.get("project_id") or (STATE.projects.active() or {}).get("id") or 0),
+                project_id=_int_arg(body.get("project_id")) or (STATE.projects.active() or {}).get("id") or 0,
                 name=str(body.get("name", "job")), task=str(body.get("task", "")),
                 spec={"kind": body.get("kind", "interval"), "every_s": body.get("every_s"), "at": body.get("at")},
             ))
         elif path == "/api/schedule/delete":
-            self._send_json({"ok": STATE.scheduler.remove(int(body.get("id", 0)))})
+            self._send_json({"ok": STATE.scheduler.remove(_int_arg(body.get("id"), 0))})
         elif path == "/api/schedule/toggle":
-            self._send_json(STATE.scheduler.set_enabled(int(body.get("id", 0)), bool(body.get("enabled", True))))
+            self._send_json(STATE.scheduler.set_enabled(_int_arg(body.get("id"), 0), bool(body.get("enabled", True))))
         elif path == "/api/watch":
             self._send_json(STATE.watcher.add(
-                project_id=int(body.get("project_id") or (STATE.projects.active() or {}).get("id") or 0),
+                project_id=_int_arg(body.get("project_id")) or (STATE.projects.active() or {}).get("id") or 0,
                 repo=str(body.get("repo", "")),
                 events=[str(e) for e in (body.get("events") or ["issues", "prs", "commits"])],
-                interval_s=int(body.get("interval_s", config.WATCH_INTERVAL_DEFAULT)),
+                interval_s=_int_arg(body.get("interval_s"), config.WATCH_INTERVAL_DEFAULT),
                 auto_task=str(body.get("auto_task", "")),
             ))
         elif path == "/api/watch/delete":
-            self._send_json({"ok": STATE.watcher.remove(int(body.get("id", 0)))})
+            self._send_json({"ok": STATE.watcher.remove(_int_arg(body.get("id"), 0))})
         elif path == "/api/snapshots/create":
-            pid = int(body["project_id"]) if body.get("project_id") else None
+            pid = _int_arg(body.get("project_id")) if body.get("project_id") else None
             self._send_json(STATE.snapshot_create(pid, str(body.get("label", "snapshot"))))
         elif path == "/api/snapshots/restore":
-            pid = int(body["project_id"]) if body.get("project_id") else None
+            pid = _int_arg(body.get("project_id")) if body.get("project_id") else None
             self._send_json(STATE.snapshot_restore(pid, str(body.get("id", ""))))
         elif path == "/api/export":
-            pid = int(body["project_id"]) if body.get("project_id") else None
+            pid = _int_arg(body.get("project_id")) if body.get("project_id") else None
             self._send_json(STATE.project_export(pid))
         elif path == "/api/import":
             self._send_json(STATE.project_import(str(body.get("name", ""))))
@@ -1041,6 +1045,17 @@ def _safe_int_call(body: Dict[str, Any], key: str, fn) -> Dict[str, Any]:
         return fn(int(body.get(key, 0)))
     except (TypeError, ValueError):
         return {"ok": False, "error": f"{key} نامعتبر است"}
+
+
+def _int_arg(value: Any, default: Optional[int] = None) -> Optional[int]:
+    """تبدیل امن ورودی کاربر به عدد — ورودی خراب پیش‌فرض برمی‌گردد، نه استثنا.
+
+    (پاس ۶: تا ۵۱ ترکیب fuzz به‌خاطر int() لخت روی query/body به ۵۰۰ می‌رسیدند)
+    """
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
 
 
 def serve(open_browser: bool = True) -> ThreadingHTTPServer:

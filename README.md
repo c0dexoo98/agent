@@ -180,6 +180,7 @@ python tests/test_bugfixes2.py       # رگرسیون پاس ۲+۳ (۱۲ تست�
 python tests/test_pass4.py           # پاس ۴: تایید/سندباکس/نرخ/زمان‌بند/نگهبان/اعلان (۱۳ تست)
 python tests/test_cli_runtime.py     # پاس ۵: کلاینت تعاملی CLI با FakeBrain + stdin اسکریپت‌شده
 python tests/test_soak.py            # پاس ۵: soak حافظه (~۱۰۰s: ۱۲۰ اتصال SSE + tracemalloc)
+python tests/test_fuzz.py            # پاس ۶: ۹۱۵ ورودی خراب به همه endpoint ها + کلاینت SSE کُند
 python tests/test_stress.py          # بار همزمان: ۱۶۴ درخواست ۸-نخی + اعتبار زنجیرهٔ ممیزی
 python tests/test_server_smoke.py    # سرور واقعی: UI + API پروژه‌ها + SSE + جریان کامل تسک
 GH_TOKEN=ghp_xxx python tests/test_github_readonly.py   # فقط‌خواندنی با API واقعی
@@ -327,3 +328,19 @@ agent/
 | ۶ | ✅ **Soak حافظه (tracemalloc)** | ۱۲۰ چرخهٔ اتصال/قطع SSE + ۳۰ تسک + ۶۰ اعلان + ۴۰ فکت + job زمان‌بند: مشترک‌های bus به baseline برگشتند (فیکس unsubscribe پاس ۴ در runtime تأیید شد)، رشد حافظه فقط ‎+۲MB کراندار، زنجیرهٔ ممیزی سالم، job با فاصلهٔ کامل فایر شد (فیکس next_run پاس ۴ در مسیر تولیدی). نکتهٔ کشف‌شده: پاک‌سازی مشترکِ قطع‌شده تا ~۳۲ ثانیه (۲ heartbeat) طول می‌کشد — کراندار، نه نشتی |
 
 **تست‌ها:** ۱۱ سوئیت — static / core / projects / v4-features / bugfixes / bugfixes2 / pass4 / **cli-runtime (جدید)** / **soak (جدید)** / stress / server-smoke — همه سبز.
+
+## 🧨 v4.6 — پاس ششم: fuzz ورودی‌های خراب + پایداری فایل‌های state
+
+سه زاویهٔ جدید: بمباران همهٔ endpointها با ورودی‌های خراب (قرارداد: همیشه JSON معتبر، صفر ۵۰۰)، ممیزی اتمی‌بودن نوشتن فایل‌های state، و کلاینت SSE کُند که صف رویدادش پر می‌شود.
+
+| # | یافته | شرح |
+|---|-------|-----|
+| ۱ | 🔴 **۲۰ نقطهٔ `int()` لخت روی ورودی کاربر** | ۵۱ ترکیب fuzz (مثل `?project=abc`، `session_id:"abc"`) به استثنای فراری و «خطای سرور ۵۰۰» می‌رسیدند؛ هلپر دفاعی `_int_arg` همه را به خطای تمیز `ok:false` یا پیش‌فرض تبدیل کرد |
+| ۲ | 🔴 **`/api/schedule` با `kind` غیررشته‌ای** | `{"kind": {"k":1}}` → `.lower()` می‌ترکاند؛ حالا `str()` قلاب‌گذاری می‌شود و پیام «kind باید interval یا daily باشد» برمی‌گردد |
+| ۳ | 🟠 **`every_s` بدون سقف → سرریز `timedelta`** | `every_s=10¹⁵` → «Python int too large to convert to C int»؛ سقف ۱۰ سال در `parse_spec` + کران دفاعی در `_next_after` (برای jobs.json دست‌کاری‌شده) |
+| ۴ | 🟠 **`/api/snapshots/restore` با شناسهٔ خالی/مسیردار** | id خالی → unzip روی خود دایرکتوری snapshots (Errno 21)؛ id با `/` یا `..` → پیمایش مسیر؛ حالا اعتبارسنجی کامل + چک `is_file` قبل از هر عملیات |
+| ۵ | 🟠 **`/api/import` با نام غول‌پیکر/مسیردار** | نام ۱۰۰هزارکاراکتری → Errno 36 از خود `resolve()`؛ حالا سقف ۲۰۰ نویسه + رد `/` و `..` قبل از ساخت مسیر |
+| ۶ | ✅ **نوشتن فایل‌های state** | همهٔ استورها (projects/memory/scheduler/watch/notifications/usage) الگوی اتمیک tmp+`replace` دارند و لودرهای‌شان به JSON خراب fault-tolerantاند (بکاپ + شروع تمیز؛ ممیزی خط ناقص آخر را رد می‌کند) — نیازی به فیکس نبود |
+| ۷ | ✅ **کلاینت SSE کُند** | مشترکی که هیچ نمی‌خواند: ۱۰۰۰ رویداد در ~۰ ثانیه عبور کردند (مسیر drop صف ۸۰۰تایی با `put_nowait` کار می‌کند)، سرور پاسخ‌گو ماند و مشترک تازه رویداد زنده گرفت |
+
+**تست‌ها:** ۱۲ سوئیت — static / core / projects / v4-features / bugfixes / bugfixes2 / pass4 / cli-runtime / soak / **fuzz (جدید)** / stress / server-smoke — همه سبز.

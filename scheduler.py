@@ -25,7 +25,7 @@ def _iso(dt: datetime) -> str:
 
 def parse_spec(spec: Dict[str, Any]) -> Dict[str, Any]:
     """تبدیل ورودی کاربر به kind/every_s/at معتبر — خطا با dict برمی‌گردد."""
-    kind = (spec.get("kind") or "interval").lower()
+    kind = str(spec.get("kind") or "interval").lower()  # str() — kind خراب نباید .lower() بترکاند (پاس ۶)
     if kind == "interval":
         every = spec.get("every_s") or spec.get("every_minutes", 0) * 60
         try:
@@ -34,6 +34,8 @@ def parse_spec(spec: Dict[str, Any]) -> Dict[str, Any]:
             return {"error": "every_s نامعتبر است"}
         if every < 30:
             return {"error": "حداقل فاصله ۳۰ ثانیه است"}
+        if every > 10 * 365 * 24 * 3600:
+            return {"error": "فاصله بیش از حد بزرگ است (سقف ۱۰ سال)"}
         return {"kind": "interval", "every_s": every}
     if kind == "daily":
         at = str(spec.get("at") or "")
@@ -94,7 +96,8 @@ class Scheduler:
             if nxt <= now:
                 nxt += timedelta(days=1)
             return _iso(nxt)
-        return _iso(now + timedelta(seconds=int(job.get("every_s", 60))))
+        # کرانِ دفاعی: every_s غول‌پیکر (مثلاً از jobs.json دست‌کاری‌شده) نباید timedelta را سرریز کند
+        return _iso(now + timedelta(seconds=min(int(job.get("every_s", 60)), 10 * 365 * 24 * 3600)))
 
     def add(self, project_id: int, name: str, task: str, spec: Dict[str, Any]) -> Dict[str, Any]:
         parsed = parse_spec(spec)

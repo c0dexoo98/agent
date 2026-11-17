@@ -70,8 +70,12 @@ class TimeMachine:
         return out
 
     def restore(self, key: str, snapshot_id: str, memory_dir: Path, skills_dir: Path) -> Dict[str, Any]:
-        src = self._dir(key) / snapshot_id
-        if not src.exists():
+        # اعتبارسنجی شناسه قبل از هر استفادهٔ مسیری (پاس ۶: id خالی/مسیر‌دار → خطای ۵۰۰)
+        sid = str(snapshot_id).strip()
+        if not sid or "/" in sid or "\\" in sid or ".." in sid or sid.startswith("."):
+            return {"ok": False, "error": "شناسهٔ snapshot نامعتبر است"}
+        src = self._dir(key) / sid
+        if not src.is_file():  # نبود/دایرکتوری‌بودن → پیام تمیز، نه استثنای unzip
             return {"ok": False, "error": "snapshot یافت نشد"}
         restored = 0
         with zipfile.ZipFile(src) as z:
