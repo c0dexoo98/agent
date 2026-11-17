@@ -23,8 +23,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
-from github import GithubException
-
 import bundles
 import config
 import globalsearch
@@ -36,7 +34,13 @@ from builtin_tools import register_builtin_tools
 from checkpoint import CheckpointStore
 from deepseek_client import DeepSeekClient
 from fs_tools import register_fs_tools
-from github_tools import GitHubTools, TokenInvalidError, register_github_tools
+from github_tools import (
+    GITHUB_LIB,
+    GitHubTools,
+    GithubException,   # از github_tools می‌آید: با/بدون PyGithub کار می‌کند (ترموکس)
+    TokenInvalidError,
+    register_github_tools,
+)
 from memory import MemoryStore, register_memory_tools
 from notifications import NotificationCenter
 from projects import ProjectManager
@@ -294,6 +298,8 @@ class DevXState:
         token = (token or "").strip()
         if not token.startswith("ghp_"):
             return {"ok": False, "error": "توکن باید یک Classic Token با پیشوند ghp_ باشد (github.com/settings/tokens)."}
+        if not GITHUB_LIB:
+            return {"ok": False, "error": "کتابخانهٔ PyGithub نصب نیست — ابزارهای گیت‌هاب غیرفعال‌اند. روی ترموکس: pkg install python-cryptography python-pynacl و بعد pip install PyGithub"}
         gh = GitHubTools(token)
         try:
             info = gh.validate_token()

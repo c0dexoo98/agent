@@ -31,8 +31,6 @@ import sys
 from getpass import getpass
 from typing import Any, Dict, List, Optional
 
-from github import GithubException
-
 import config
 from agent_loop import AgentEngine, DeepSeekBrain, EventBus
 from approval import ApprovalManager
@@ -41,7 +39,13 @@ from builtin_tools import register_builtin_tools
 from checkpoint import CheckpointStore
 from deepseek_client import DeepSeekClient
 from fs_tools import register_fs_tools
-from github_tools import GitHubTools, TokenInvalidError, register_github_tools
+from github_tools import (
+    GITHUB_LIB,
+    GitHubTools,
+    GithubException,   # از github_tools می‌آید: با/بدون PyGithub کار می‌کند (ترموکس)
+    TokenInvalidError,
+    register_github_tools,
+)
 from memory import MemoryStore, register_memory_tools
 from notifications import NotificationCenter
 from projects import ProjectManager
@@ -76,6 +80,10 @@ def obtain_github_tools(max_attempts: Optional[int] = None) -> GitHubTools:
     می‌شود دوباره وارد کند (تا TOKEN_MAX_ATTEMPTS تلاش).
     """
     attempts = max_attempts or config.TOKEN_MAX_ATTEMPTS
+    if not GITHUB_LIB:
+        print("⚠️ PyGithub نصب نیست — ابزارهای گیت‌هاب غیرفعال‌اند و بدون توکن ادامه می‌دهیم.")
+        print("   روی ترموکس: pkg install python-cryptography python-pynacl و بعد pip install PyGithub\n")
+        return None
     print("🔑 برای عملیات گیت‌هاب به یک GitHub Classic Token نیاز است.")
     print("   توکن را از https://github.com/settings/tokens بسازید (Generate new token (classic)).")
     print("   اسکوپ‌های حداقلی: repo  — و در صورت نیاز به Actions: workflow")

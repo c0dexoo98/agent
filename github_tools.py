@@ -31,8 +31,24 @@ from __future__ import annotations
 import itertools
 from typing import Any, Dict, List, Optional
 
-from github import Auth, Github, GithubException
-from github.Repository import Repository
+# PyGithub فقط برای ابزارهای گیت‌هاب لازم است؛ روی دستگاه‌هایی که نصب‌شدنش سخت است
+# (مثلاً ترموکس اندروید — cryptography/pynacl ویل ندارند و از سورس با Rust build می‌شوند)
+# بقیهٔ برنامه باید بدون آن هم بالا بیاید — باگ قابل‌حمل بودن پاس ۱۰
+try:
+    from github import Auth, Github, GithubException
+    from github.Repository import Repository
+    GITHUB_LIB = True
+except ImportError:
+    GITHUB_LIB = False
+    Github = Auth = Repository = None
+
+    class GithubException(Exception):
+        """جایگزین امن برای except-clause ها وقتی کتابخانهٔ گیت‌هاب نصب نیست."""
+        status: int = 0
+
+
+class GitHubUnavailableError(Exception):
+    """عملیات گیت‌هاب خواسته شده ولی PyGithub روی دستگاه نصب نیست."""
 
 
 class TokenInvalidError(Exception):
@@ -72,6 +88,11 @@ class GitHubTools:
     @property
     def gh(self) -> Github:
         """ساخت تنبل کلاینت PyGithub 2.x با الگوی رسمی Auth.Token."""
+        if not GITHUB_LIB:
+            raise GitHubUnavailableError(
+                "PyGithub نصب نیست — ابزارهای گیت‌هاب در دسترس نیستند. "
+                "روی ترموکس: pkg install python-cryptography python-pynacl و بعد pip install PyGithub"
+            )
         if self._gh is None:
             if not self._token:
                 raise TokenInvalidError("توکنی در دسترس نیست — ابتدا validate_token اجرا شود")
