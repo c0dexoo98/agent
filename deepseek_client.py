@@ -34,6 +34,17 @@ except ImportError:
     sync_playwright = None
 
 
+def _is_termux() -> bool:
+    """تشخیص ترموکس/اندروید — برای پیام خطای صادقانه (متغیر TERMUX=1 برای تست)."""
+    import os
+    if os.environ.get("TERMUX") == "1":
+        return True
+    from pathlib import Path as _P
+    if _P("/data/data/com.termux").exists():
+        return True
+    return "com.termux" in os.environ.get("PREFIX", "")
+
+
 class DeepSeekError(Exception):
     """خطای عمومی کلاینت دیپ‌سیک."""
 
@@ -113,6 +124,12 @@ class DeepSeekClient:
         if self._ctx is not None:
             return
         if not PLAYWRIGHT_AVAILABLE:
+            if _is_termux():
+                raise DeepSeekError(
+                    "playwright نصب نیست — مرورگر دیپ‌سیک روی ترموکس/اندروید قابل اجرا نیست "
+                    "(کرومیوم برای playwright در اندروید وجود ندارد). بقیهٔ امکانات کار می‌کند؛ "
+                    "برای اجرای کامل تسک‌ها از کامپیوتر استفاده کن."
+                )
             raise DeepSeekError(
                 "playwright نصب نیست — مرورگر دیپ‌سیک روی این دستگاه قابل اجرا نیست. "
                 "برای نصب: pip install playwright && playwright install chromium"

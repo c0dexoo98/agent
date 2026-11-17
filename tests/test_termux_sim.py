@@ -7,11 +7,13 @@
 سرور باید کامل بیاید، UI سرو شود، /api/token خطای ساخت‌یافته بدهد و
 github-tools هم به‌صورت ساخت‌یافته «غیرفعال» را گزارش کند.
 """
+import os
 import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
+os.environ["TERMUX"] = "1"   # شبیه‌سازی محیط ترموکس برای پیام خطای صادقانه
 
 _BLOCKED = ("playwright", "github", "nacl", "dotenv")
 
@@ -42,7 +44,8 @@ try:
     c.start()
     raise SystemExit("start() باید خطای واضح می‌داد")
 except DeepSeekError as e:
-    assert "playwright نصب نیست" in str(e), str(e)
+    assert "playwright نصب نیست" in str(e) and "ترموکس/اندروید قابل اجرا نیست" in str(e), str(e)
+print("ok: بدون playwright — روی ترموکس پیام صادقانه می‌دهد (نه راهنمای نصب بی‌فایده)")
 print("ok: بدون playwright — start() خطای واضح و ساخت‌یافته می‌دهد")
 
 try:
