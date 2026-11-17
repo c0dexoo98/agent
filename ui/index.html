@@ -536,6 +536,7 @@ main{display:grid;grid-template-columns:1fr 340px;gap:16px;padding:16px 22px;max
   <span id="alertMsg"><b>ورود لازم است</b> — اکانت دیپ‌سیک لاگین نیست.</span>
   <button class="btn" style="flex:0 0 auto;padding:7px 16px" onclick="manualLogin()">🔑 باز کردن پنجرهٔ ورود</button>
   <button class="btn ghost" style="flex:0 0 auto;padding:7px 16px" onclick="reconnect()">↻ اتصال مجدد</button>
+  <button class="btn ghost" style="flex:0 0 auto;padding:7px 16px" onclick="setApiKey()">🧠 کلید API</button>
 </div>
 
 <!-- ═══════════ بدنه ═══════════ -->
@@ -1054,6 +1055,17 @@ async function manualLogin(){
 async function reconnect(){
   await fetch('/api/deepseek/reconnect',{method:'POST'});
   toast('info','اتصال مجدد آغاز شد…');
+}
+/* مغز API: کلید سرویس سازگار با OpenAI را می‌گیرد و بدون مرورگر مغز را وصل می‌کند */
+async function setApiKey(){
+  const key=prompt('کلید API سرویس (مثلاً sk-... از platform.deepseek.com):\nبرای ماندگاری می‌توانی همان را در .env هم بگذاری (AI_API_KEY=)');
+  if(!key||!key.trim())return;
+  const base=prompt('آدرس پایهٔ API (خالی بگذار برای https://api.deepseek.com):','')||'';
+  const r=await fetch('/api/ai',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({key:key.trim(),base_url:base.trim()})});
+  const j=await r.json();
+  if(j.ok){toast('ok','مغز API فعال شد ('+(j.model||'')+') — بدون مرورگر!',6000);loadState();}
+  else toast('err','کلید API پذیرفته نشد: '+(j.error||'خطای نامشخص'),8000);
 }
 
 /* ── ارسال تسک ───────────────────────────────────────────────── */

@@ -39,6 +39,7 @@ from builtin_tools import register_builtin_tools
 from checkpoint import CheckpointStore
 from deepseek_client import DeepSeekClient
 from fs_tools import register_fs_tools
+from api_client import APIBrain, APIError
 from github_tools import (
     GITHUB_LIB,
     GitHubTools,
@@ -278,26 +279,49 @@ def run_cli() -> None:
     bus = EventBus()
     bus.subscribe(cli_event_printer)
 
-    brain_client = DeepSeekClient(
-        user_data_dir=config.DEEPSEEK_USER_DATA_DIR,
-        url=config.DEEPSEEK_URL,
-        headless=config.DEEPSEEK_HEADLESS,
-        response_timeout=config.RESPONSE_TIMEOUT,
-        poll_interval=config.RESPONSE_POLL_INTERVAL,
-        stable_checks=config.RESPONSE_STABLE_CHECKS,
-    )
-    print(f"🌐 راه‌اندازی مرورگر ماندگار (پروفایل: {config.DEEPSEEK_USER_DATA_DIR}) ...")
-    brain_client.start()
+    # اولویت مغز API: اگر AI_API_KEY در .env هست، مرورگر اصلاً باز نمی‌شود —
+    # روی ترموکس/اندروید کرومیوم وجود ندارد؛ روی سرور بی‌سر هم API ساده‌تر است
+    if config.AI_API_KEY:
+        api_brain = APIBrain(
+            base_url=config.AI_BASE_URL, api_key=config.AI_API_KEY,
+            model=config.AI_MODEL, timeout=config.AI_TIMEOUT,
+        )
+        print(f"🧠 مغز API فعال ({config.AI_MODEL} روی {config.AI_BASE_URL}) — اعتبارسنجی کلید…")
+        try:
+            models = api_brain.validate()
+            print(f"✅ کلید معتبر است — {len(models)} مدل در دسترس.\n")
+        except APIError as e:
+            print(f"⛔ {e}")
+            sys.exit(3)
+        brain = api_brain
+    else:
+        brain_client = DeepSeekClient(
+            user_data_dir=config.DEEPSEEK_USER_DATA_DIR,
+            url=config.DEEPSEEK_URL,
+            headless=config.DEEPSEEK_HEADLESS,
+            response_timeout=config.RESPONSE_TIMEOUT,
+            poll_interval=config.RESPONSE_POLL_INTERVAL,
+            stable_checks=config.RESPONSE_STABLE_CHECKS,
+        )
+        print(f"🌐 راه‌اندازی مرورگر ماندگار (پروفایل: {config.DEEPSEEK_USER_DATA_DIR}) ...")
+        try:
+            brain_client.start()
+        except Exception as e:
+            print(f"⛔ راه‌اندازی مرورگر ممکن نشد: {e}")
+            print("   یا کرومیوم نصب کن (playwright install chromium)، یا در .env مقدار")
+            print("   AI_API_KEY را بگذار تا حالت API بدون مرورگر استفاده شود.")
+            sys.exit(3)
 
-    try:
-        brain_client.ensure_logged_in()
-    except Exception as e:
-        print(f"⛔ {e}")
-        brain_client.close()
-        sys.exit(3)
+        try:
+            brain_client.ensure_logged_in()
+        except Exception as e:
+            print(f"⛔ {e}")
+            brain_client.close()
+            sys.exit(3)
+        brain = DeepSeekBrain(brain_client)
 
     engine = AgentEngine(
-        brain=DeepSeekBrain(brain_client),
+        brain=brain,
         memory=memory,
         skills=skills,
         event_bus=bus,

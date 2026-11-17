@@ -59,6 +59,18 @@ DEEPSEEK_USER_DATA_DIR: Path = Path(
 DEEPSEEK_HEADLESS: bool = _bool("DEEPSEEK_HEADLESS", "false")
 
 # ---------------------------------------------------------------------------
+# مغز API (جایگزین مرورگر — همه‌جا کار می‌کند، از جمله ترموکس/اندروید)
+# ---------------------------------------------------------------------------
+# هر سرویس سازگار با OpenAI-Chat-Completions: DeepSeek رسمی، OpenRouter، z.ai، ...
+# اگر AI_API_KEY تنظیم شده باشد، در اولویت است و مرورگر اصلاً باز نمی‌شود.
+# نکتهٔ امنیتی: کلید API در .env می‌ماند (روی دستگاه خودتان) یا فقط در حافظهٔ
+# اجرا از طریق UI (/api/ai) داده می‌شود — هرگز در کد/لاگ/گیت ثبت نمی‌شود.
+AI_API_KEY: str = os.getenv("AI_API_KEY", "").strip()
+AI_BASE_URL: str = os.getenv("AI_BASE_URL", "https://api.deepseek.com").rstrip("/")
+AI_MODEL: str = os.getenv("AI_MODEL", "deepseek-chat").strip()
+AI_TIMEOUT: int = int(os.getenv("AI_TIMEOUT", "240"))
+
+# ---------------------------------------------------------------------------
 # حلقهٔ ایجنت (Agent Loop)
 # ---------------------------------------------------------------------------
 

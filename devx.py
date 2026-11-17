@@ -50,6 +50,12 @@ def main() -> None:
     print()
 
     server = serve(open_browser=not args.no_browser)
+    # اتصال خودکار مغز در شروع: اولویت با API (اگر AI_API_KEY هست) وگرنه مرورگر دیپ‌سیک
+    try:
+        from server import STATE as _STATE
+        _STATE.connect_deepseek(visible_login=False)
+    except Exception:
+        pass
     print("  ⏹  برای خروج Ctrl+C")
     try:
         server.serve_forever()

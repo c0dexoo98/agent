@@ -32,6 +32,7 @@ from approval import ApprovalManager
 from audit import AuditLog
 from builtin_tools import register_builtin_tools
 from checkpoint import CheckpointStore
+from api_client import APIBrain, APIError
 from deepseek_client import DeepSeekClient
 from fs_tools import register_fs_tools
 from github_tools import (
@@ -79,6 +80,11 @@ class DevXState:
         self.token_info: Optional[Dict[str, Any]] = None
         self.client: Optional[DeepSeekClient] = None
         self.brain: Optional[DeepSeekBrain] = None
+        # مغز API: کلید فقط در حافظهٔ همین اجرا (از UI) یا از .env؛ هرگز روی دیسک نمی‌رود
+        self._api_key_mem: Optional[str] = None
+        self._api_base: Optional[str] = None
+        self._api_model: Optional[str] = None
+        self.brain_kind: Optional[str] = None   # "api" | "browser" | None
 
         # حافظه/مهارت ایزولهٔ پروژهٔ فعال + سشن‌ها
         self.memory = self._memory_for(self.projects.active())
@@ -330,6 +336,16 @@ class DevXState:
             with self._connector_lock:
                 self.deepseek_started = False
                 self.deepseek_ready = False
+                # اولویت مغز API: اگر کلید API هست (حافظه یا .env) مرورگر اصلاً باز نمی‌شود —
+                # روی ترموکس/اندروید کرومیوم وجود ندارد و روی PC هم API سبک‌تر است
+                if self._api_key_mem or config.AI_API_KEY:
+                    try:
+                        self._apply_api_brain()
+                        return
+                    except APIError as e:
+                        self.deepseek_message = str(e)
+                        self.bus.emit("deepseek_state", ready=False, error=str(e))
+                        return
                 try:
                     if self.client is not None:
                         self.client.close()
@@ -381,6 +397,61 @@ class DevXState:
             eng.brain = self.brain
             eng.enable_streaming()
         self.bus.emit("deepseek_state", ready=True, message=self.deepseek_message)
+
+    def _apply_api_brain(self, model: Optional[str] = None) -> None:
+        """ساخت مغز API و روشن‌کردن آن روی موتور اصلی و همهٔ سشن‌ها."""
+        base = self._api_base or config.AI_BASE_URL
+        key = self._api_key_mem or config.AI_API_KEY
+        mdl = model or self._api_model or config.AI_MODEL
+        self.brain = APIBrain(base_url=base, api_key=key, model=mdl, timeout=config.AI_TIMEOUT)
+        self.brain_kind = "api"
+        self.deepseek_started = True
+        self.deepseek_ready = True
+        self.deepseek_message = f"مغز API فعال ({mdl}) — بدون مرورگر"
+        self.engine.brain = self.brain
+        self.engine.enable_streaming()
+        for eng in self._session_engines.values():
+            eng.brain = self.brain
+            eng.enable_streaming()
+        self.bus.emit("deepseek_state", ready=True, message=self.deepseek_message, kind="api")
+
+    def connect_ai(self, api_key: str, base_url: str = "", model: str = "") -> Dict[str, Any]:
+        """تنظیم کلید API از UI — اعتبارسنجی با GET /models و فعال‌سازی فوری.
+
+        کلید فقط در حافظهٔ همین اجرا نگه داشته می‌شود (مثل توکن گیت‌هاب)؛
+        برای ماندگاری، کاربر می‌تواند آن را در .env بگذارد.
+        """
+        key = (api_key or "").strip()
+        if not key:
+            return {"ok": False, "error": "کلید API خالی است — کلید سرویس (مثلاً sk-...) را بده."}
+        base = (base_url or "").strip() or self._api_base or config.AI_BASE_URL
+        mdl = (model or "").strip() or self._api_model or config.AI_MODEL
+        probe = APIBrain(base_url=base, api_key=key, model=mdl, timeout=config.AI_TIMEOUT)
+        try:
+            models = probe.validate()
+        except APIError as e:
+            return {"ok": False, "error": str(e)}
+        self._api_key_mem = key
+        self._api_base = base.rstrip("/")
+        self._api_model = mdl
+        try:
+            self._apply_api_brain()
+        except APIError as e:
+            return {"ok": False, "error": str(e)}
+        self.audit.append("api_brain_set", {"model": mdl, "models_count": len(models)})
+        return {"ok": True, "model": mdl, "models_count": len(models)}
+
+    def api_status(self) -> Dict[str, Any]:
+        key = self._api_key_mem or config.AI_API_KEY
+        masked = (key[:5] + "…" + key[-4:]) if len(key) > 11 else ("" if not key else "…")
+        return {
+            "ok": True,
+            "kind": self.brain_kind,
+            "ready": self.deepseek_ready,
+            "model": self._api_model or (config.AI_MODEL if config.AI_API_KEY else ""),
+            "base_url": self._api_base or config.AI_BASE_URL,
+            "key_masked": masked if (self._api_key_mem or config.AI_API_KEY) else "",
+        }
 
     # ------------------------------------------------------------------
     # سشن‌ها و اجرای تسک (چندسشن موازی)
@@ -831,6 +902,8 @@ class DevXHandler(BaseHTTPRequestHandler):
             })
         elif path == "/api/sessions":
             self._send_json({"ok": True, **STATE.sessions_list()})
+        elif path == "/api/ai":
+            self._send_json(STATE.api_status())
         elif path == "/api/notifications":
             unread = (qs.get("unread") or ["0"])[0] == "1"
             self._send_json({"ok": True, "unread": STATE.notifications.unread_count(),
@@ -976,6 +1049,12 @@ class DevXHandler(BaseHTTPRequestHandler):
         elif path == "/api/deepseek/reconnect":
             STATE.connect_deepseek(visible_login=False)
             self._send_json({"ok": True, "message": "اتصال مجدد آغاز شد"})
+        elif path == "/api/ai":
+            self._send_json(STATE.connect_ai(
+                api_key=str(body.get("key", "")),
+                base_url=str(body.get("base_url", "")),
+                model=str(body.get("model", "")),
+            ))
         else:
             self._send_json({"ok": False, "error": "not found"}, status=404)
 
