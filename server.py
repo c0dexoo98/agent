@@ -359,20 +359,30 @@ class DevXState:
             "user_code": info["user_code"],
             "verification_uri": info["verification_uri"],
             "expires_in": info["expires_in"],
+            "interval": info["interval"],
             "message": f"در مرورگر باز کن: {info['verification_uri']} و کد {info['user_code']} را وارد کن",
         }
 
     def github_login_poll(self) -> Dict[str, Any]:
-        """چک وضعیت ورود با مرورگر؛ اگر تأیید شده باشد کلاینت گیت‌هاب نصب می‌شود."""
+        """چک وضعیت ورود با مرورگر؛ اگر تأیید شده باشد کلاینت گیت‌هاب نصب می‌شود.
+
+        جریان فقط روی وضعیت‌های نهایی (authorized/expired/error ساخت‌یافته)
+        بسته می‌شود؛ خطاهای گذرای شبکه جریان را زنده نگه می‌دارند تا UI ادامه
+        بدهد — تجربهٔ واقعی موبایل: کاربر تبِ گیت‌هاب را باز می‌کند، تبِ اپ فریز
+        یا شبکه لحظه‌ای قطع می‌شود؛ نباید یک خطای گذرا کل ورود را بکشد.
+        پاسخ‌های pending/slow_down هم «interval» لازم را برمی‌گردانند تا UI
+        با ضرب‌آهنگ مجاز گیت‌هاب پول بزند (پول زودتر از interval = slow_down)."""
         flow = self._gh_flow
         if flow is None:
-            return {"ok": False, "status": "none", "error": "اول «ورود با مرورگر» را شروع کن."}
+            return {"ok": False, "status": "none",
+                    "error": "جلسهٔ ورود پیدا نشد (سرور ری‌استارت شده؟) — دوباره «ورود با مرورگر» را بزن."}
         from gh_oauth import DeviceFlowError
         try:
             res = flow.poll()
         except DeviceFlowError as e:
-            self._gh_flow = None
-            return {"ok": False, "status": "error", "error": str(e)}
+            # خطای گذرا (شبکه/پروکسی/مهلت) — device_code در گیت‌هاب معتبر مانده؛ جریان زنده می‌ماند
+            return {"ok": False, "status": "network_error", "error": short_error(e),
+                    "interval": max(5.0, flow.interval)}
         status = res.get("status")
         if status == "authorized":
             token = res.get("token") or ""
@@ -381,11 +391,12 @@ class DevXState:
             if install.get("ok"):
                 return {"ok": True, "status": "authorized", "login": install.get("login")}
             return {"ok": False, "status": "error", "error": install.get("error")}
-        if status == "pending":
-            return {"ok": True, "status": "pending", "user_code": flow.user_code, "verification_uri": flow.verification_uri}
-        if status == "slow_down":
-            return {"ok": True, "status": "pending", "user_code": flow.user_code, "verification_uri": flow.verification_uri,
-                    "message": "گیت‌هاب گفت آهسته‌تر — کمی صبر"}
+        if status in ("pending", "slow_down"):
+            out = {"ok": True, "status": "pending", "user_code": flow.user_code,
+                   "verification_uri": flow.verification_uri, "interval": flow.interval}
+            if status == "slow_down":
+                out["message"] = "گیت‌هاب گفت آهسته‌تر — فاصلهٔ پول‌ها بیشتر شد"
+            return out
         if status == "expired":
             self._gh_flow = None
             return {"ok": False, "status": "expired", "error": "کد ورود منقضی شد — دوباره «ورود با مرورگر» را بزن."}

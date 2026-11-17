@@ -349,6 +349,32 @@ none_flow = srvmod.STATE.github_login_poll()
 assert none_flow.get("ok") is False and none_flow.get("status") == "none", none_flow
 print("✅ ۱۰) github_login_start/poll → نصب ابزارها + /api/token با gho_ + poll بدون جلسه")
 
+# ─── ۱۱) تاب‌آوری جریان: خطای گذرای شبکه جریان را نمی‌کشد ───────────────────
+# سناریوی واقعی موبایل: کاربر در تب گیت‌هاب است، شبکه/سرور لحظه‌ای می‌پرد؛
+# device_code در گیت‌هاب معتبر مانده و پول بعدی باید جریان را ادامه بدهد.
+from gh_oauth import DeviceFlow as _DF  # noqa: E402
+
+dead = _DF(oauth_base="http://127.0.0.1:9", timeout=2)  # پورت ۹ → رد فوری اتصال
+dead.device_code, dead.user_code, dead.verification_uri, dead.interval = "x", "X-1", "http://x", 5
+srvmod.STATE._gh_flow = dead
+r = srvmod.STATE.github_login_poll()
+assert r.get("ok") is False and r.get("status") == "network_error", r
+assert srvmod.STATE._gh_flow is dead, "خطای گذرا نباید جریان ورود را بکشد"
+assert r.get("interval", 0) >= 5, r
+srvmod.STATE._gh_flow = None
+print("✅ ۱۱) خطای گذرای شبکه → network_error و جریان زنده می‌ماند")
+
+# ─── ۱۲) پاسخ start/poll دارای interval برای ضرب‌آهنگ صحیح UI ───────────────
+start2 = srvmod.STATE.github_login_start()
+assert start2["ok"] and start2["user_code"] == "ABCD-1234", start2
+assert start2.get("interval", 0) >= 1, f"start باید interval گیت‌هاب را بدهد: {start2}"
+p = srvmod.STATE.github_login_poll()
+assert p["ok"] and p["status"] == "pending" and p.get("interval", 0) >= 1, p
+p2 = srvmod.STATE.github_login_poll()
+assert p2["ok"] and p2["status"] in ("pending", "authorized"), p2
+srvmod.STATE._gh_flow = None
+print("✅ ۱۲) start/poll دارای interval (UI با ضرب‌آهنگ مجاز گیت‌هاب پول می‌زند)")
+
 s.shutdown()
 s.server_close()
 srv.shutdown()

@@ -936,7 +936,8 @@ svg{flex:0 0 auto}
       <div style="font-size:12px;color:var(--muted)">این کد را در صفحهٔ باز‌شده وارد کن:</div>
       <div class="code" id="ghUserCode">----</div>
       <a class="btn sm" id="ghVerifyLink" href="https://github.com/login/device" target="_blank" rel="noopener" style="text-decoration:none;display:inline-flex">باز کردن صفحهٔ تأیید</a>
-      <div style="font-size:11px;color:var(--faint);margin-top:8px">منتظر تأیید تو در مرورگر…</div>
+      <div id="ghWait" style="font-size:11px;color:var(--faint);margin-top:10px;line-height:1.9">منتظر تأیید تو در مرورگر…</div>
+      <button class="btn ghost sm" id="ghRestart" style="display:none;margin-top:8px" onclick="browserLogin()">↻ شروع دوباره (کد تازه)</button>
     </div>
     <div class="sub" style="margin-top:14px">
       — یا توکن دستی: از <a href="https://github.com/settings/tokens" target="_blank" rel="noopener">github.com/settings/tokens</a>
@@ -1200,8 +1201,15 @@ es.onmessage=ev=>{
   switch(e){
     case 'snapshot': refreshAll(); break;
     case 'deepseek_state': loadState(); break;
-    case 'token_state': loadState(); loadGithub();
-      toast('ok',`گیت‌هاب متصل شد: <b>${esc(m.login)}</b>`); break;
+    case 'token_state':
+      loadState();loadGithub();
+      /* مسیر دوم موفقیت: حتی اگر حلقهٔ پول مُرده باشد، رویداد زندهٔ SSE مودال را می‌بندد */
+      if($('tokenOverlay').classList.contains('show')){
+        ghSuccess(m.login);
+      }else if(!m.replay){
+        toast('ok',`گیت‌هاب متصل شد: <b>${esc(m.login||'')}</b>`);
+      }
+      break;
     case 'task_start':
       running=true;updateSend();renderRounds(0,m.max_rounds);
       $('empty')?.remove();
@@ -1546,33 +1554,81 @@ async function submitToken(){
   finally{btn.disabled=false;btn.textContent='اعتبارسنجی و اتصال'}
 }
 function openTokenModal(){try{sessionStorage.removeItem('dxTokenSkip')}catch(_){}$('tokenOverlay').classList.add('show')}
-let ghPollTimer=null;
-function stopGhPoll(){if(ghPollTimer){clearInterval(ghPollTimer);ghPollTimer=null}}
-function closeTokenModal(){stopGhPoll();$('tokenOverlay').classList.remove('show');try{sessionStorage.setItem('dxTokenSkip','1')}catch(_){}toast('info','بدون گیت‌هاب هم حافظه/مهارت/ابزارها کار می‌کنند — برای اتصال بعدی چیپ GitHub را بزن.')}
-/* ورود با مرورگر (Device Flow): کد می‌گیرد، کاربر در مرورگر لاگین‌شده تأیید می‌کند — بدون هیچ کلیدی */
+let ghPollTimer=null,ghWaitTimer=null,ghPollMs=5000,ghStartTs=0,ghWaitMsg='منتظر تأیید تو در مرورگر…';
+function stopGhPoll(){
+  if(ghPollTimer){clearTimeout(ghPollTimer);ghPollTimer=null}
+  if(ghWaitTimer){clearInterval(ghWaitTimer);ghWaitTimer=null}
+}
+function ghWaitTick(){
+  const el=$('ghWait');if(!el)return;
+  const s=Math.round((Date.now()-ghStartTs)/1000);
+  el.textContent=`${ghWaitMsg} · ${s}s (این پنجره را باز نگه دار)`;
+}
+function ghTerminal(msg){
+  stopGhPoll();
+  const el=$('ghWait');if(el)el.textContent=msg;
+  const rb=$('ghRestart');if(rb)rb.style.display='inline-flex';
+  $('tokenErr').textContent=msg;
+}
+function ghSuccess(login){
+  stopGhPoll();
+  $('tokenOverlay').classList.remove('show');
+  $('ghCodeBox').style.display='none';
+  toast('ok',`اتصال گیت‌هاب برقرار شد (<b>${esc(login||'')}</b>) — بدون هیچ کلید!`,7000);
+  loadState();loadGithub();
+  if(typeof switchView==='function')switchView('github'); /* نمایش فوری اکانت وصل‌شده */
+}
+function closeTokenModal(){
+  stopGhPoll();
+  $('tokenOverlay').classList.remove('show');
+  $('ghCodeBox').style.display='none';
+  $('ghRestart').style.display='none';
+  try{sessionStorage.setItem('dxTokenSkip','1')}catch(_){}
+  toast('info','بدون گیت‌هاب هم حافظه/مهارت/ابزارها کار می‌کنند — برای اتصال بعدی چیپ GitHub را بزن.')
+}
+/* ورود با مرورگر (Device Flow): کد می‌گیرد، کاربر در مرورگر لاگین‌شده تأیید می‌کند — بدون هیچ کلیدی.
+   پول‌زنی مقاوم: فقط وضعیت‌های نهایی (authorized/expired/error/none) حلقه را می‌بندند؛
+   خطای گذرای شبکه/سرور هرگز حلقه را نمی‌کشد و ضرب‌آهنگ از interval گیت‌هاب پیروی می‌کند. */
 async function browserLogin(){
   const err=$('tokenErr');err.textContent='';stopGhPoll();
+  $('ghRestart').style.display='none';
   try{
     const r=await fetch('/api/github/login',{method:'POST'});const j=await r.json();
     if(!j.ok){err.textContent=j.error||'شروع ورود ناموفق بود.';return}
     $('ghCodeBox').style.display='block';
     $('ghUserCode').textContent=j.user_code||'----';
     $('ghVerifyLink').href=j.verification_uri||'https://github.com/login/device';
+    ghPollMs=Math.max(2000,((j.interval||5))*1000); /* گیت‌هاب اجازهٔ پول زودتر از interval نمی‌دهد */
+    ghStartTs=Date.now();ghWaitMsg='منتظر تأیید تو در مرورگر…';ghWaitTick();
+    ghWaitTimer=setInterval(ghWaitTick,1000);
     toast('info','کد گرفته شد — در مرورگر تأییدش کن',6000);
-    ghPollTimer=setInterval(async()=>{
+    const pollOnce=async()=>{
       try{
         const pr=await fetch('/api/github/poll',{method:'POST'});const pj=await pr.json();
-        if(pj.ok&&pj.status==='authorized'){
-          stopGhPoll();
-          $('tokenOverlay').classList.remove('show');
-          toast('ok','اتصال گیت‌هاب برقرار شد ('+(pj.login||'')+') — بدون هیچ کلید!',7000);
-          loadState();loadGithub();
-        }else if(!pj.ok){
-          stopGhPoll();
-          err.textContent=pj.error||'ورود ناموفق بود.';
+        const st=pj.status;
+        if(pj.ok&&st==='authorized'){ghSuccess(pj.login);return}
+        if(st==='pending'){
+          if(pj.interval)ghPollMs=Math.max(2000,pj.interval*1000);
+          ghWaitMsg=pj.message||'منتظر تأیید تو در مرورگر…';
+          ghPollTimer=setTimeout(pollOnce,ghPollMs);return;
         }
-      }catch(_){/* پول بعدی */}
-    },3000);
+        if(st==='network_error'){
+          /* خطای گذرای شبکه — device_code هنوز معتبر است، ادامه می‌دهیم */
+          ghWaitMsg='ارتباط لحظه‌ای با گیت‌هاب برقرار نشد — تلاش مجدد…';
+          if(pj.interval)ghPollMs=Math.max(2000,pj.interval*1000);
+          ghPollTimer=setTimeout(pollOnce,ghPollMs);return;
+        }
+        /* expired / none / error — پایان با پیام روشن + دکمهٔ شروع دوباره */
+        ghTerminal(pj.error||'ورود ناموفق بود — دوباره «ورود با مرورگر» را بزن.');
+      }catch(_){
+        /* سرور در دسترس نیست (مثلاً پروسهٔ ترموکس کشته شده) — حلقه زنده می‌ماند */
+        ghWaitMsg='سرور در دسترس نیست — در حال تلاش مجدد… (اگر سرور ری‌استارت شده، «شروع دوباره» را بزن)';
+        $('ghRestart').style.display='inline-flex';
+        ghPollMs=Math.min(10000,ghPollMs+1000);
+        ghPollTimer=setTimeout(pollOnce,ghPollMs);
+      }
+    };
+    ghPollTimer=setTimeout(pollOnce,ghPollMs);
   }catch(e){err.textContent='خطای ارتباط با سرور.'}
 }
 $('tokenInput')?.addEventListener('keydown',e=>{if(e.key==='Enter')submitToken()});
