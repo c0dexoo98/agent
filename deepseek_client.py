@@ -18,12 +18,20 @@ import time
 from pathlib import Path
 from typing import Dict, Optional
 
-from playwright.sync_api import (
-    BrowserContext,
-    Page,
-    Playwright,
-    sync_playwright,
-)
+# playwright فقط برای مرورگر دیپ‌سیک لازم است؛ روی دستگاه‌هایی که کرومیوم ندارند
+# (مثلاً ترموکس اندروید) بقیهٔ برنامه باید بدون آن هم بالا بیاید — باگ قابل‌حمل بودن پاس ۱۰
+try:
+    from playwright.sync_api import (
+        BrowserContext,
+        Page,
+        Playwright,
+        sync_playwright,
+    )
+    PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    PLAYWRIGHT_AVAILABLE = False
+    BrowserContext = Page = Playwright = None  # فقط برای type hints (annotations تاخیری‌اند)
+    sync_playwright = None
 
 
 class DeepSeekError(Exception):
@@ -104,6 +112,11 @@ class DeepSeekClient:
         """راه‌اندازی مرورگر کرومیوم با پروفایل ماندگار و بازکردن صفحهٔ چت."""
         if self._ctx is not None:
             return
+        if not PLAYWRIGHT_AVAILABLE:
+            raise DeepSeekError(
+                "playwright نصب نیست — مرورگر دیپ‌سیک روی این دستگاه قابل اجرا نیست. "
+                "برای نصب: pip install playwright && playwright install chromium"
+            )
         self.user_data_dir.mkdir(parents=True, exist_ok=True)
         self._pw = sync_playwright().start()
         self._ctx = self._pw.chromium.launch_persistent_context(

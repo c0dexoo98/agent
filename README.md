@@ -85,6 +85,22 @@ playwright install chromium        # مرورگر کرومیوم
 cp .env.example .env               # تنظیمات (اختیاری)
 ```
 
+### نصب روی ترموکس (اندروید)
+
+ترموکس را از **F-Droid** نصب کنید (نسخهٔ Play Store قدیمی است). playwright و کرومیوم روی اندروید قابل نصب نیستند؛ بنابراین فقط خودِ ایجنت را می‌گیرید — مدیریت مرورگر دیپ‌سیک در دسترس نیست ولی بقیهٔ چیزها (پروژه‌ها، حافظه، مهارت‌ها، ابزارهای گیت‌هاب، زمان‌بند، وب‌جستجو) کامل کار می‌کنند:
+
+```bash
+pkg update -y && pkg upgrade -y
+pkg install python git -y
+git clone https://github.com/c0dexoo98/agent.git
+cd agent
+pip install PyGithub python-dotenv    # playwright لازم نیست — روی ترموکس نصب نمی‌شود
+cp .env.example .env
+python devx.py --no-browser           # → http://127.0.0.1:8770 را در مرورگر گوشی باز کن
+```
+
+سپس در مرورگر گوشی `http://127.0.0.1:8770` را باز کنید؛ مودال توکن گیت‌هاب را می‌بینید (یا «فعلاً نه»). برای قطع سرور در ترموکس `Ctrl+C` بزنید (در ترموکس: `Volume-Down + C`).
+
 ### رابط وب DevX (پیشنهادی)
 
 ```bash
