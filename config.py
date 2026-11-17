@@ -70,6 +70,10 @@ AI_BASE_URL: str = os.getenv("AI_BASE_URL", "https://api.deepseek.com").rstrip("
 AI_MODEL: str = os.getenv("AI_MODEL", "deepseek-chat").strip()
 AI_TIMEOUT: int = int(os.getenv("AI_TIMEOUT", "240"))
 
+# پایه‌های گیت‌هاب (پیش‌فرض واقعی؛ فقط تست‌ها بازنویسی می‌کنند)
+GH_API_BASE: str = os.getenv("GH_API_BASE", "https://api.github.com").rstrip("/")
+GH_OAUTH_BASE: str = os.getenv("GH_OAUTH_BASE", "https://github.com").rstrip("/")
+
 # ---------------------------------------------------------------------------
 # حلقهٔ ایجنت (Agent Loop)
 # ---------------------------------------------------------------------------

@@ -1,46 +1,35 @@
 # -*- coding: utf-8 -*-
-"""ابزارهای GitHub برای ایجنت — پیاده‌سازی با PyGithub نسخهٔ 2.x.
+"""ابزارهای GitHub برای ایجنت — کلاینت REST v3 خالص (بدون PyGithub).
 
-نکات امنیتی مهم (بخش توضیحات الزامی طبق مشخصات پروژه):
+چرا REST خالص؟ توکن کلاسیک باید دستی ساخته/کپی شود و PyGithub روی ترموکس
+اندروید نصب نمی‌شود (cryptography/pynacl ویل ندارند و build با Rust شکست
+می‌خورد). از پاس «ورود با مرورگر» به بعد این ماژول با gh_api.py (urllib خالص)
+کار می‌کند و روی همه‌جا — PC، سرور لینوکس و ترموکس — یکسان است و به هیچ pip نیاز ندارد. ورود توکن با Device Flow انجام می‌شود: کاربر فقط در مرورگری که
+از قبل لاگین است یک کد کوتاه را تأیید می‌کند (همان نشست/کوکی مرورگر) و هیچ
+کلیدی ساخته یا کپی نمی‌شود؛ توکن فقط در حافظهٔ همین اجرا زندگی می‌کند و هرگز
+در فایل، لاگ یا کد ذخیره/چاپ نمی‌شود.
 
-۱) توکن کلاسیک باید از صفحهٔ https://github.com/settings/tokens ساخته شود
-   (Developer settings → Personal access tokens → Tokens (classic) → Generate new token (classic)).
-   حداقل اسکوپ‌های موردنیاز:
-       - repo    → دسترسی کامل به مخازن عمومی/پرایوت (کد، Issues، PR، Releases)
-       - workflow→ ساخت/ویرایش فایل‌های .github/workflows و اجرای Actions (در صورت نیاز)
-   (برای ابزار delete_repo به‌تنهایی اسکوپ delete_repo لازم است که پیش‌فرض نیست.)
-
-۲) توکن فقط در حافظهٔ همین اجرا نگه داشته می‌شود (آبجکت GitHubTools)؛ هرگز در
-   فایل، لاگ یا کد ذخیره/چاپ نمی‌شود. ورود توکن با getpass انجام می‌شود تا در
-   ترمینال هم نمایش داده نشود.
-
-۳) توکن کلاسیک به‌طور پیش‌فرض به منابع «سازمان‌ها» هم دسترسی دارد (به‌جز
-   سازمان‌هایی که SSO/محدودسازی توکن فعال کرده‌اند)؛ بنابراین باید با احتیاط
-   ساخته و استفاده شود و در پایان کار حذف یا محدود شود.
-
-۴) در PyGithub 2.x باید آبجکت Auth ساخته شود:
-       auth = Auth.Token(token)
-       gh = Github(auth=auth)
-   (سبک قدیمی Github(token) در نسخهٔ 2.x منسوخ شده است.)
+اسکوپ‌های ورود با مرورگر: repo workflow read:org gist
+(برای delete_repo به‌تنهایی اسکوپ delete_repo لازم است که پیش‌فرض نیست.)
 
 هر ابزار یک متد مستقل است که ورودی‌های مشخص دارد و خروجی را به‌صورت dict
 (JSON-سازگار) برمی‌گرداند تا مدل بتواند از آن استفاده کند.
 """
 from __future__ import annotations
 
-import itertools
+import base64
 from typing import Any, Dict, List, Optional
 
-# PyGithub فقط برای ابزارهای گیت‌هاب لازم است؛ روی دستگاه‌هایی که نصب‌شدنش سخت است
-# (مثلاً ترموکس اندروید — cryptography/pynacl ویل ندارند و از سورس با Rust build می‌شوند)
-# بقیهٔ برنامه باید بدون آن هم بالا بیاید — باگ قابل‌حمل بودن پاس ۱۰
+from gh_api import GhApiError, PureGhClient
+
+# سازگاری با کدهای قبلی: GITHUB_LIB و GithubException هنوز import می‌شوند
+# (server.py/agent.py و تست‌ها به آن‌ها اشاره دارند) ولی دیگر هیچ عملیاتی
+# به PyGithub وابسته نیست — پرچم فقط برای گزارش وضعیت کتابخانهٔ اختیاری می‌ماند.
 try:
-    from github import Auth, Github, GithubException
-    from github.Repository import Repository
+    from github import GithubException  # noqa: F401
     GITHUB_LIB = True
 except ImportError:
     GITHUB_LIB = False
-    Github = Auth = Repository = None
 
     class GithubException(Exception):
         """جایگزین امن برای except-clause ها وقتی کتابخانهٔ گیت‌هاب نصب نیست."""
@@ -48,19 +37,11 @@ except ImportError:
 
 
 class GitHubUnavailableError(Exception):
-    """عملیات گیت‌هاب خواسته شده ولی PyGithub روی دستگاه نصب نیست."""
+    """منسوخ — از ورود با مرورگر به بعد ابزارهای گیت‌هاب بدون PyGithub هم کار می‌کنند."""
 
 
 class TokenInvalidError(Exception):
-    """وقتی توکن ۴۰۱ بدهد (نامعتبر یا باطل‌شده)."""
-
-
-def _iso(dt: Any) -> Optional[str]:
-    """تبدیل امن datetime به رشتهٔ ISO؛ None-سازگار."""
-    try:
-        return dt.isoformat() if dt else None
-    except Exception:
-        return None
+    """وقتی توکن/نشست ۴۰۱ بدهد (نامعتبر یا باطل‌شده)."""
 
 
 def _sha(sha: Optional[str]) -> Optional[str]:
@@ -68,16 +49,17 @@ def _sha(sha: Optional[str]) -> Optional[str]:
 
 
 class GitHubTools:
-    """نگهدارندهٔ کلاینت PyGithub و همهٔ عملیات گیت‌هاب به‌صورت ابزار.
+    """ابزارهای گیت‌هاب روی کلاینت REST خالص (gh_api.PureGhClient).
 
-    توکن تنها در self._token (حافظهٔ این آبجکت) زندگی می‌کند و از آن
-    فقط برای ساخت کلاینت Github استفاده می‌شود.
+    توکن/نشست فقط در self._token (حافظهٔ همین اجرا) زندگی می‌کند و هرگز
+    serialize/لاگ نمی‌شود. بدون PyGithub هم کامل کار می‌کند (ترموکس).
     """
 
-    def __init__(self, token: Optional[str]) -> None:
+    def __init__(self, token: Optional[str], api_base: Optional[str] = None) -> None:
         self._token = token          # فقط در حافظه — هرگز serialize/لاگ نمی‌شود
-        self._gh: Optional[Github] = None
-        self._user: Any = None       # کاربر احرازهویت‌شده (پس از validate_token)
+        self._api_base = (api_base or "https://api.github.com").rstrip("/")
+        self._client: Optional[PureGhClient] = None
+        self._user: Optional[Dict[str, Any]] = None   # کاربر احرازهویت‌شده (پس از validate_token)
         self._login: Optional[str] = None
         self._scopes: Optional[str] = None  # مقدار هدر X-OAuth-Scopes از پاسخ /user
 
@@ -86,39 +68,31 @@ class GitHubTools:
     # ------------------------------------------------------------------
 
     @property
-    def gh(self) -> Github:
-        """ساخت تنبل کلاینت PyGithub 2.x با الگوی رسمی Auth.Token."""
-        if not GITHUB_LIB:
-            raise GitHubUnavailableError(
-                "PyGithub نصب نیست — ابزارهای گیت‌هاب در دسترس نیستند. "
-                "روی ترموکس: pkg install python-cryptography python-pynacl و بعد pip install PyGithub"
-            )
-        if self._gh is None:
+    def client(self) -> PureGhClient:
+        """ساخت تنبل کلاینت REST خالص — بدون هیچ وابستگی خارجی."""
+        if self._client is None:
             if not self._token:
-                raise TokenInvalidError("توکنی در دسترس نیست — ابتدا validate_token اجرا شود")
-            auth = Auth.Token(self._token)   # الگوی رسمی نسخهٔ 2.x
-            self._gh = Github(auth=auth, base_url="https://api.github.com", per_page=30)
-        return self._gh
+                raise TokenInvalidError("توکنی در دسترس نیست — ابتدا ورود با مرورگر یا توکن انجام شود")
+            self._client = PureGhClient(self._token, api_base=self._api_base)
+        return self._client
 
     def validate_token(self) -> Dict[str, Any]:
-        """اعتبارسنجی توکن با GET https://api.github.com/user.
+        """اعتبارسنجی با GET https://api.github.com/user.
 
-        اگر نام کاربری برگردد، توکن معتبر است؛ اگر 401 بدهد TokenInvalidError
-        پرتاب می‌شود تا agent.py پیام واضح بدهد و از کاربر بخواهد دوباره وارد کند.
+        اگر نام کاربری برگردد، نشست معتبر است؛ اگر 401/403 بدهد
+        TokenInvalidError پرتاب می‌شود تا پیام واضح بدهیم و دوباره ورود بخواهیم.
         """
         try:
-            # درخواست خام تا هدر X-OAuth-Scopes هم خوانده شود
-            # (در PyGithub 2.x خروجی requestJsonAndCheck تاپل (headers, data) است)
-            headers, data = self.gh.requester.requestJsonAndCheck("GET", "/user")
-        except GithubException as e:
+            data = self.client.get_user()
+        except GhApiError as e:
             if e.status in (401, 403):
                 raise TokenInvalidError(
-                    f"توکن نامعتبر است یا اسکوپ کافی ندارد (HTTP {e.status})"
+                    f"توکن/نشست نامعتبر است یا اسکوپ کافی ندارد (HTTP {e.status})"
                 ) from e
             raise
+        self._user = data
         self._login = data.get("login")
-        self._scopes = headers.get("x-oauth-scopes", "") or None
-        self._user = self.gh.get_user()
+        self._scopes = self.client.last_scopes
         return {
             "login": self._login,
             "name": data.get("name"),
@@ -130,14 +104,14 @@ class GitHubTools:
     def login(self) -> Optional[str]:
         return self._login
 
-    def _repo(self, repo: str) -> Repository:
-        """دریافت ریپو با «owner/name» یا فقط «name» (مالک = کاربر خودش)."""
+    def _repo_name(self, repo: str) -> str:
+        """«owner/name» یا فقط «name» (مالک = کاربر خودش) → نام کامل."""
         repo = str(repo).strip().strip("/")
         if "/" in repo:
-            return self.gh.get_repo(repo)
+            return repo
         if not self._user:
-            self._user = self.gh.get_user()
-        return self._user.get_repo(repo)
+            self._user = self.client.get_user()
+        return f"{self._user.get('login')}/{repo}"
 
     # ==================================================================
     # ابزارهای فقط‌خواندنی (Read-only)
@@ -147,29 +121,26 @@ class GitHubTools:
         """اطلاعات کاربرِ صاحب توکن + اسکوپ‌های توکن."""
         if not self._user:
             self.validate_token()
+        assert self._user is not None
         return {
-            "login": self._user.login,
-            "name": self._user.name,
-            "email": self._user.email,
-            "bio": self._user.bio,
-            "html_url": self._user.html_url,
-            "public_repos": self._user.public_repos,
-            "created_at": _iso(self._user.created_at),
+            "login": self._user.get("login"),
+            "name": self._user.get("name"),
+            "email": self._user.get("email"),
+            "bio": self._user.get("bio"),
+            "html_url": self._user.get("html_url"),
+            "public_repos": self._user.get("public_repos"),
+            "created_at": self._user.get("created_at"),
             "token_scopes": self._scopes,
         }
 
     def get_rate_limit(self) -> Dict[str, Any]:
-        """سهمیهٔ فعلی API گیت‌هاب (برای عیب‌یابی خطاهای 403 rate-limit).
-
-        در PyGithub 2.x خروجی get_rate_limit ساختار RateLimitOverview دارد:
-        هستهٔ REST در .resources.core قرار می‌گیرد (با سازگاری .rate).
-        """
-        overview = self.gh.get_rate_limit()
-        core = getattr(overview, "resources", None).core if getattr(overview, "resources", None) else overview.rate
+        """سهمیهٔ فعلی API گیت‌هاب (برای عیب‌یابی خطاهای 403 rate-limit)."""
+        data = self.client.get_rate_limit()
+        core = (data.get("resources") or {}).get("core") or data.get("rate") or {}
         return {
-            "limit": core.limit,
-            "remaining": core.remaining,
-            "reset_utc": _iso(core.reset),
+            "limit": core.get("limit"),
+            "remaining": core.get("remaining"),
+            "reset_utc": core.get("reset"),
         }
 
     def list_repos(
@@ -182,114 +153,123 @@ class GitHubTools:
         affiliation یکی از: owner (مالک خودم)، collaborator، organization_member
         یا ترکیب با کاما مثل owner,collaborator.
         """
-        repos_iter = self.gh.get_user().get_repos(affiliation=affiliation)
+        repos = self.client.list_user_repos(affiliation=affiliation, per_page=max(1, min(int(limit), 100)))
         items = []
-        for r in itertools.islice(repos_iter, max(1, min(int(limit), 100))):
+        for r in repos[: max(1, min(int(limit), 100))]:
             items.append(
                 {
-                    "full_name": r.full_name,
-                    "private": r.private,
-                    "description": r.description,
-                    "language": r.language,
-                    "stars": r.stargazers_count,
-                    "pushed_at": _iso(r.pushed_at),
-                    "html_url": r.html_url,
+                    "full_name": r.get("full_name"),
+                    "private": r.get("private"),
+                    "description": r.get("description"),
+                    "language": r.get("language"),
+                    "stars": r.get("stargazers_count"),
+                    "pushed_at": r.get("pushed_at"),
+                    "html_url": r.get("html_url"),
                 }
             )
         return {"count": len(items), "repos": items}
 
     def get_repo(self, repo: str) -> Dict[str, Any]:
         """متادیتای کامل یک مخزن («owner/name» یا «name» برای مخازن خود کاربر)."""
-        r = self._repo(repo)
+        r = self.client.get_repo(self._repo_name(repo))
         license_name = None
-        try:
-            license_name = r.license.name if r.license else None
-        except Exception:
-            pass
+        lic = r.get("license") or {}
+        license_name = lic.get("name") or lic.get("spdx_id")
         return {
-            "full_name": r.full_name,
-            "private": r.private,
-            "description": r.description,
-            "html_url": r.html_url,
-            "default_branch": r.default_branch,
-            "language": r.language,
-            "size_kb": r.size,
-            "stars": r.stargazers_count,
-            "forks": r.forks_count,
-            "open_issues": r.open_issues_count,
-            "topics": list(r.get_topics() or []),
+            "full_name": r.get("full_name"),
+            "private": r.get("private"),
+            "description": r.get("description"),
+            "html_url": r.get("html_url"),
+            "default_branch": r.get("default_branch"),
+            "language": r.get("language"),
+            "size_kb": r.get("size"),
+            "stars": r.get("stargazers_count"),
+            "forks": r.get("forks_count"),
+            "open_issues": r.get("open_issues_count"),
+            "topics": list(r.get("topics") or []),
             "license": license_name,
-            "created_at": _iso(r.created_at),
-            "pushed_at": _iso(r.pushed_at),
+            "created_at": r.get("created_at"),
+            "pushed_at": r.get("pushed_at"),
         }
 
     def get_repo_status(self, repo: str) -> Dict[str, Any]:
         """وضعیت لحظه‌ای مخزن: شاخه‌ها، آخرین کامیت‌ها، تعداد Issues/PR باز و آخرین اجرای Actions."""
-        r = self._repo(repo)
-        branches = list(itertools.islice(r.get_branches(), 20))
+        full = self._repo_name(repo)
+        r = self.client.get_repo(full)
+        branches = self.client.list_branches(full, per_page=20)
         commits = []
-        for c in itertools.islice(r.get_commits(), 5):
+        for c in (self.client.list_commits(full, per_page=5) or [])[:5]:
+            ca = (c.get("commit") or {}).get("author") or {}
             commits.append(
                 {
-                    "sha": _sha(c.sha),
-                    "message": (c.commit.message or "")[:120],
-                    "author": (c.commit.author.name if c.commit.author else None),
-                    "date": _iso(c.commit.author.date if c.commit.author else None),
+                    "sha": _sha(c.get("sha")),
+                    "message": ((c.get("commit") or {}).get("message") or "")[:120],
+                    "author": ca.get("name"),
+                    "date": ca.get("date"),
                 }
             )
         last_run = None
         try:
-            for run in itertools.islice(r.get_workflow_runs(), 1):
+            runs = (self.client.workflow_runs(full, per_page=1) or {}).get("workflow_runs") or []
+            if runs:
+                run = runs[0]
                 last_run = {
-                    "name": run.name,
-                    "status": run.status,
-                    "conclusion": run.conclusion,
-                    "created_at": _iso(run.created_at),
+                    "name": run.get("name"),
+                    "status": run.get("status"),
+                    "conclusion": run.get("conclusion"),
+                    "created_at": run.get("created_at"),
                 }
-        except Exception:
+        except GhApiError:
             last_run = None
         return {
-            "full_name": r.full_name,
-            "default_branch": r.default_branch,
+            "full_name": r.get("full_name"),
+            "default_branch": r.get("default_branch"),
             "branch_count": len(branches),
-            "branches": [b.name for b in branches],
+            "branches": [b.get("name") for b in branches],
             "recent_commits": commits,
-            "open_issues": r.open_issues_count,
+            "open_issues": r.get("open_issues_count"),
             "last_workflow_run": last_run,
-            "pushed_at": _iso(r.pushed_at),
+            "pushed_at": r.get("pushed_at"),
         }
 
     def list_branches(self, repo: str, limit: int = 50) -> Dict[str, Any]:
         """فهرست شاخه‌های مخزن."""
-        r = self._repo(repo)
-        items = []
-        for b in itertools.islice(r.get_branches(), max(1, min(int(limit), 100))):
-            items.append({"name": b.name, "sha": _sha(b.commit.sha), "protected": b.protected})
+        full = self._repo_name(repo)
+        branches = self.client.list_branches(full, per_page=max(1, min(int(limit), 100)))[: max(1, min(int(limit), 100))]
+        items = [
+            {
+                "name": b.get("name"),
+                "sha": _sha((b.get("commit") or {}).get("sha")),
+                "protected": b.get("protected"),
+            }
+            for b in branches
+        ]
         return {"count": len(items), "branches": items}
 
     def get_file_contents(self, repo: str, path: str, ref: Optional[str] = None) -> Dict[str, Any]:
         """محتوای یک فایل (یا فهرست محتویات یک پوشه) از مخزن."""
-        r = self._repo(repo)
-        contents = r.get_contents(path, ref=ref) if ref else r.get_contents(path)
-        if isinstance(contents, list):
+        full = self._repo_name(repo)
+        data = self.client.get_contents(full, path, ref=ref)
+        if isinstance(data, list):
             return {
                 "type": "directory",
                 "path": path,
                 "entries": [
-                    {"name": c.name, "type": c.type, "path": c.path, "size": c.size}
-                    for c in contents
+                    {"name": c.get("name"), "type": c.get("type"), "path": c.get("path"), "size": c.get("size")}
+                    for c in data
                 ],
             }
         decoded = ""
         try:
-            decoded = (contents.decoded_content or b"").decode("utf-8", errors="replace")
+            raw = base64.b64decode(data.get("content") or "")
+            decoded = raw.decode("utf-8", errors="replace")
         except Exception as e:
             decoded = f"[محتوای دودویی یا ناخوانا: {e}]"
         return {
             "type": "file",
-            "path": contents.path,
-            "size": contents.size,
-            "encoding": contents.encoding,
+            "path": data.get("path"),
+            "size": data.get("size"),
+            "encoding": data.get("encoding"),
             "content": decoded,
         }
 
@@ -300,15 +280,16 @@ class GitHubTools:
         limit: int = 200,
     ) -> Dict[str, Any]:
         """فهرست همهٔ فایل‌های مخزن از روی git tree (فیلتر پیشوند مسیر اختیاری)."""
-        r = self._repo(repo)
-        tree = r.get_git_tree(r.default_branch, recursive=True)
+        full = self._repo_name(repo)
+        default_branch = self.client.get_repo(full).get("default_branch") or "main"
+        tree = self.client.git_tree(full, default_branch, recursive=True)
         prefix = (path_prefix or "").strip().strip("/")
         paths = [
-            el.path
-            for el in tree.tree
-            if el.type == "blob" and (not prefix or el.path.startswith(prefix))
+            el.get("path")
+            for el in (tree.get("tree") or [])
+            if el.get("type") == "blob" and (not prefix or str(el.get("path", "")).startswith(prefix))
         ]
-        truncated = len(paths) > int(limit)
+        truncated = len(paths) > int(limit) or bool(tree.get("truncated"))
         return {
             "count": min(len(paths), int(limit)),
             "truncated": truncated,
@@ -322,40 +303,41 @@ class GitHubTools:
         limit: int = 30,
     ) -> Dict[str, Any]:
         """فهرست Issues مخزن (Pull Requestها فیلتر می‌شوند). state: open/closed/all."""
-        r = self._repo(repo)
+        full = self._repo_name(repo)
+        issues = self.client.list_issues(full, state=state, per_page=max(1, min(int(limit), 100)))
         items = []
-        for i in itertools.islice(r.get_issues(state=state), max(1, min(int(limit), 100))):
-            if getattr(i, "pull_request", None):
+        for i in issues[: max(1, min(int(limit), 100))]:
+            if i.get("pull_request"):
                 continue  # PRها در ابزار جداگانهٔ list_pull_requests هستند
             items.append(
                 {
-                    "number": i.number,
-                    "title": i.title,
-                    "state": i.state,
-                    "user": i.user.login if i.user else None,
-                    "labels": [lb.name for lb in i.labels],
-                    "comments": i.comments,
-                    "html_url": i.html_url,
-                    "created_at": _iso(i.created_at),
+                    "number": i.get("number"),
+                    "title": i.get("title"),
+                    "state": i.get("state"),
+                    "user": (i.get("user") or {}).get("login"),
+                    "labels": [lb.get("name") for lb in (i.get("labels") or [])],
+                    "comments": i.get("comments"),
+                    "html_url": i.get("html_url"),
+                    "created_at": i.get("created_at"),
                 }
             )
         return {"count": len(items), "issues": items}
 
     def get_issue(self, repo: str, number: int) -> Dict[str, Any]:
         """جزئیات کامل یک Issue."""
-        i = self._repo(repo).get_issue(int(number))
+        i = self.client.get_issue(self._repo_name(repo), int(number))
         return {
-            "number": i.number,
-            "title": i.title,
-            "state": i.state,
-            "author": i.user.login if i.user else None,
-            "body": (i.body or "")[:4000],
-            "labels": [lb.name for lb in i.labels],
-            "assignees": [a.login for a in i.assignees],
-            "comments": i.comments,
-            "html_url": i.html_url,
-            "created_at": _iso(i.created_at),
-            "closed_at": _iso(i.closed_at),
+            "number": i.get("number"),
+            "title": i.get("title"),
+            "state": i.get("state"),
+            "author": (i.get("user") or {}).get("login"),
+            "body": (i.get("body") or "")[:4000],
+            "labels": [lb.get("name") for lb in (i.get("labels") or [])],
+            "assignees": [(a or {}).get("login") for a in (i.get("assignees") or [])],
+            "comments": i.get("comments"),
+            "html_url": i.get("html_url"),
+            "created_at": i.get("created_at"),
+            "closed_at": i.get("closed_at"),
         }
 
     def list_pull_requests(
@@ -365,105 +347,118 @@ class GitHubTools:
         limit: int = 30,
     ) -> Dict[str, Any]:
         """فهرست Pull Requestها. state: open/closed/all."""
-        r = self._repo(repo)
+        full = self._repo_name(repo)
+        pulls = self.client.list_pulls(full, state=state, per_page=max(1, min(int(limit), 100)))
         items = []
-        for pr in itertools.islice(r.get_pulls(state=state), max(1, min(int(limit), 100))):
+        for pr in pulls[: max(1, min(int(limit), 100))]:
             items.append(
                 {
-                    "number": pr.number,
-                    "title": pr.title,
-                    "state": pr.state,
-                    "draft": pr.draft,
-                    "user": pr.user.login if pr.user else None,
-                    "head": pr.head.ref,
-                    "base": pr.base.ref,
-                    "html_url": pr.html_url,
-                    "created_at": _iso(pr.created_at),
+                    "number": pr.get("number"),
+                    "title": pr.get("title"),
+                    "state": pr.get("state"),
+                    "draft": pr.get("draft"),
+                    "user": (pr.get("user") or {}).get("login"),
+                    "head": (pr.get("head") or {}).get("ref"),
+                    "base": (pr.get("base") or {}).get("ref"),
+                    "html_url": pr.get("html_url"),
+                    "created_at": pr.get("created_at"),
                 }
             )
         return {"count": len(items), "pull_requests": items}
 
     def get_pull_request_status(self, repo: str, number: int) -> Dict[str, Any]:
         """وضعیت ادغام و CI یک Pull Request (mergeable + نتیجهٔ check runs)."""
-        r = self._repo(repo)
-        pr = r.get_pull(int(number))
+        full = self._repo_name(repo)
+        pr = self.client.get_pull(full, int(number))
+        head_sha = (pr.get("head") or {}).get("sha")
         checks = []
+        combined = None
         try:
-            commit = r.get_commit(pr.head.sha)
-            for cr in itertools.islice(commit.get_check_runs(), 20):
-                checks.append({"name": cr.name, "status": cr.status, "conclusion": cr.conclusion})
-            combined = commit.get_combined_status().state
-        except Exception as e:
-            combined = f"unavailable: {e}"
+            cr = self.client.get_check_runs(full, head_sha) if head_sha else {}
+            checks = [
+                {"name": c.get("name"), "status": c.get("status"), "conclusion": c.get("conclusion")}
+                for c in (cr.get("check_runs") or [])[:20]
+            ]
+        except GhApiError as e:
+            combined = f"unavailable: check-runs HTTP {e.status}"
+        try:
+            combined = (self.client.get_combined_status(full, head_sha) if head_sha else {}).get("state")
+        except GhApiError as e:
+            combined = f"unavailable: status HTTP {e.status}"
         return {
-            "number": pr.number,
-            "title": pr.title,
-            "state": pr.state,
-            "merged": pr.merged,
-            "mergeable": pr.mergeable,
-            "mergeable_state": pr.mergeable_state,
-            "head_sha": _sha(pr.head.sha),
+            "number": pr.get("number"),
+            "title": pr.get("title"),
+            "state": pr.get("state"),
+            "merged": pr.get("merged"),
+            "mergeable": pr.get("mergeable"),
+            "mergeable_state": pr.get("mergeable_state"),
+            "head_sha": _sha(head_sha),
             "combined_status": combined,
             "check_runs": checks,
-            "html_url": pr.html_url,
+            "html_url": pr.get("html_url"),
         }
 
     def list_commits(self, repo: str, branch: Optional[str] = None, limit: int = 10) -> Dict[str, Any]:
         """کامیت‌های اخیر مخزن (روی یک شاخهٔ اختیاری)."""
-        r = self._repo(repo)
-        it = r.get_commits(sha=branch) if branch else r.get_commits()
+        full = self._repo_name(repo)
+        commits = self.client.list_commits(full, sha=branch, per_page=max(1, min(int(limit), 100)))
         items = []
-        for c in itertools.islice(it, max(1, min(int(limit), 100))):
+        for c in commits[: max(1, min(int(limit), 100))]:
+            ca = (c.get("commit") or {}).get("author") or {}
             items.append(
                 {
-                    "sha": _sha(c.sha),
-                    "message": (c.commit.message or "")[:200],
-                    "author": c.commit.author.name if c.commit.author else None,
-                    "date": _iso(c.commit.author.date if c.commit.author else None),
-                    "html_url": c.html_url,
+                    "sha": _sha(c.get("sha")),
+                    "message": ((c.get("commit") or {}).get("message") or "")[:200],
+                    "author": ca.get("name"),
+                    "date": ca.get("date"),
+                    "html_url": c.get("html_url"),
                 }
             )
         return {"count": len(items), "commits": items}
 
     def list_workflows(self, repo: str, limit: int = 30) -> Dict[str, Any]:
         """فهرست GitHub Actions workflows مخزن."""
-        r = self._repo(repo)
-        items = []
-        for w in itertools.islice(r.get_workflows(), max(1, min(int(limit), 100))):
-            items.append({"id": w.id, "name": w.name, "path": w.path, "state": w.state})
+        full = self._repo_name(repo)
+        data = self.client.list_workflows(full, per_page=max(1, min(int(limit), 100)))
+        items = [
+            {"id": w.get("id"), "name": w.get("name"), "path": w.get("path"), "state": w.get("state")}
+            for w in (data.get("workflows") or [])[: max(1, min(int(limit), 100))]
+        ]
         return {"count": len(items), "workflows": items}
 
     def get_workflow_runs(self, repo: str, limit: int = 10) -> Dict[str, Any]:
         """آخرین اجراهای GitHub Actions مخزن."""
-        r = self._repo(repo)
+        full = self._repo_name(repo)
+        data = self.client.workflow_runs(full, per_page=max(1, min(int(limit), 50)))
         items = []
-        for run in itertools.islice(r.get_workflow_runs(), max(1, min(int(limit), 50))):
+        for run in (data.get("workflow_runs") or [])[: max(1, min(int(limit), 50))]:
             items.append(
                 {
-                    "id": run.id,
-                    "name": run.name,
-                    "status": run.status,
-                    "conclusion": run.conclusion,
-                    "event": run.event,
-                    "branch": run.head_branch,
-                    "head_sha": _sha(run.head_sha),
-                    "run_number": run.run_number,
-                    "html_url": run.html_url,
-                    "created_at": _iso(run.created_at),
+                    "id": run.get("id"),
+                    "name": run.get("name"),
+                    "status": run.get("status"),
+                    "conclusion": run.get("conclusion"),
+                    "event": run.get("event"),
+                    "branch": run.get("head_branch"),
+                    "head_sha": _sha(run.get("head_sha")),
+                    "run_number": run.get("run_number"),
+                    "html_url": run.get("html_url"),
+                    "created_at": run.get("created_at"),
                 }
             )
         return {"count": len(items), "workflow_runs": items}
 
     def search_repositories(self, query: str, limit: int = 10) -> Dict[str, Any]:
         """جستجوی سراسری مخازن در گیت‌هاب (همان نحو جستجوی سایت)."""
+        data = self.client.search_repos(query=query, per_page=max(1, min(int(limit), 50)))
         items = []
-        for r in itertools.islice(self.gh.search_repositories(query=query), max(1, min(int(limit), 50))):
+        for r in (data.get("items") or [])[: max(1, min(int(limit), 50))]:
             items.append(
                 {
-                    "full_name": r.full_name,
-                    "description": r.description,
-                    "stars": r.stargazers_count,
-                    "html_url": r.html_url,
+                    "full_name": r.get("full_name"),
+                    "description": r.get("description"),
+                    "stars": r.get("stargazers_count"),
+                    "html_url": r.get("html_url"),
                 }
             )
         return {"query": query, "count": len(items), "repositories": items}
@@ -480,9 +475,8 @@ class GitHubTools:
         auto_init: bool = True,
     ) -> Dict[str, Any]:
         """ساخت مخزن جدید برای کاربر صاحب توکن (پیش‌فرض: پرایوت با README)."""
-        u = self._user or self.gh.get_user()
-        r = u.create_repo(name=name, description=description or None, private=private, auto_init=auto_init)
-        return {"full_name": r.full_name, "private": r.private, "html_url": r.html_url}
+        r = self.client.create_user_repo(name=name, description=description or None, private=private, auto_init=auto_init)
+        return {"full_name": r.get("full_name"), "private": r.get("private"), "html_url": r.get("html_url")}
 
     def delete_repo(self, repo: str, confirm: bool = False) -> Dict[str, Any]:
         """حذف مخزن (غیرقابل‌بازگشت!) — نیازمند پارامتر confirm=True و اسکوپ delete_repo."""
@@ -491,10 +485,9 @@ class GitHubTools:
                 "ok": False,
                 "error": "برای حذف مخزن باید confirm=true ارسال شود. این عملیات غیرقابل‌بازگشت است.",
             }
-        r = self._repo(repo)
-        full_name = r.full_name
-        r.delete()
-        return {"deleted": full_name}
+        full = self._repo_name(repo)
+        self.client.delete_repo(full)
+        return {"deleted": full}
 
     def create_or_update_file(
         self,
@@ -505,25 +498,32 @@ class GitHubTools:
         branch: Optional[str] = None,
     ) -> Dict[str, Any]:
         """ساخت یا به‌روزرسانی یک فایل در مخزن با یک کامیت."""
-        r = self._repo(repo)
-        kwargs: Dict[str, Any] = {}
-        if branch:
-            kwargs["branch"] = branch
-        res = r.create_file(path=path, message=message, content=content.encode("utf-8"), **kwargs)
-        commit = res.get("commit") if isinstance(res, dict) else None
+        full = self._repo_name(repo)
+        sha = None
+        try:
+            existing = self.client.get_contents(full, path, ref=branch)
+            if not isinstance(existing, list):
+                sha = existing.get("sha")
+        except GhApiError as e:
+            if e.status != 404:
+                raise
+        res = self.client.put_contents(full, path, content, message, branch=branch, sha=sha)
+        commit_sha = (res.get("commit") or {}).get("sha")
+        repo_meta = self.client.get_repo(full)
+        default_branch = repo_meta.get("default_branch") or "main"
         return {
             "path": path,
-            "branch": branch or r.default_branch,
-            "commit_sha": _sha(commit.sha) if commit else None,
-            "html_url": r.html_url + f"/blob/{branch or r.default_branch}/{path}",
+            "branch": branch or default_branch,
+            "commit_sha": _sha(commit_sha),
+            "html_url": repo_meta.get("html_url") + f"/blob/{branch or default_branch}/{path}",
         }
 
     def create_branch(self, repo: str, branch_name: str, from_branch: Optional[str] = None) -> Dict[str, Any]:
         """ساخت شاخهٔ جدید از روی یک شاخهٔ مبنا (پیش‌فرض: شاخهٔ پیش‌فرض)."""
-        r = self._repo(repo)
-        base = from_branch or r.default_branch
-        sha = r.get_branch(base).commit.sha
-        r.create_git_ref(ref=f"refs/heads/{branch_name}", sha=sha)
+        full = self._repo_name(repo)
+        base = from_branch or (self.client.get_repo(full).get("default_branch") or "main")
+        sha = (self.client.get_branch(full, base).get("commit") or {}).get("sha")
+        self.client.create_ref(full, f"refs/heads/{branch_name}", sha)
         return {"created": branch_name, "from": base, "base_sha": _sha(sha)}
 
     def create_issue(
@@ -534,23 +534,21 @@ class GitHubTools:
         labels: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """ساخت Issue جدید در مخزن."""
-        r = self._repo(repo)
-        i = r.create_issue(title=title, body=body or None, labels=labels or [])
-        return {"number": i.number, "title": i.title, "html_url": i.html_url}
+        i = self.client.create_issue(self._repo_name(repo), title=title, body=body or None, labels=labels or None)
+        return {"number": i.get("number"), "title": i.get("title"), "html_url": i.get("html_url")}
 
     def comment_on_issue(self, repo: str, number: int, body: str) -> Dict[str, Any]:
         """ثبت کامنت روی یک Issue (کامنت PRها هم از همین مسیر است)."""
-        i = self._repo(repo).get_issue(int(number))
-        c = i.create_comment(body)
-        return {"issue": i.number, "comment_html_url": c.html_url}
+        full = self._repo_name(repo)
+        c = self.client.add_issue_comment(full, int(number), body)
+        return {"issue": int(number), "comment_html_url": c.get("html_url")}
 
     def update_issue_state(self, repo: str, number: int, state: str = "closed") -> Dict[str, Any]:
         """بستن یا بازگشایی یک Issue. state: open یا closed."""
         if state not in ("open", "closed"):
             return {"ok": False, "error": "state باید 'open' یا 'closed' باشد"}
-        i = self._repo(repo).get_issue(int(number))
-        i.edit(state=state)
-        return {"number": i.number, "state": i.state}
+        i = self.client.update_issue_state(self._repo_name(repo), int(number), state)
+        return {"number": i.get("number"), "state": i.get("state")}
 
     def create_pull_request(
         self,
@@ -561,17 +559,14 @@ class GitHubTools:
         body: str = "",
     ) -> Dict[str, Any]:
         """ساخت Pull Request از شاخهٔ head به شاخهٔ base."""
-        r = self._repo(repo)
-        pr = r.create_pull(title=title, body=body or None, head=head, base=base)
-        return {"number": pr.number, "title": pr.title, "html_url": pr.html_url}
+        pr = self.client.create_pull(self._repo_name(repo), title=title, body=body or None, head=head, base=base)
+        return {"number": pr.get("number"), "title": pr.get("title"), "html_url": pr.get("html_url")}
 
     def comment_on_pr(self, repo: str, number: int, body: str) -> Dict[str, Any]:
         """ثبت کامنت روی یک Pull Request (در API گیت‌هاب کامنت PR = کامنت Issue متناظر)."""
-        r = self._repo(repo)
-        pr = r.get_pull(int(number))
-        i = r.get_issue(pr.number)
-        c = i.create_comment(body)
-        return {"pr": pr.number, "comment_html_url": c.html_url}
+        full = self._repo_name(repo)
+        c = self.client.add_issue_comment(full, int(number), body)
+        return {"pr": int(number), "comment_html_url": c.get("html_url")}
 
     def merge_pull_request(
         self,
@@ -584,15 +579,11 @@ class GitHubTools:
         """ادغام یک Pull Request. merge_method: merge / squash / rebase."""
         if merge_method not in ("merge", "squash", "rebase"):
             return {"ok": False, "error": "merge_method باید merge، squash یا rebase باشد"}
-        pr = self._repo(repo).get_pull(int(number))
-        kwargs: Dict[str, Any] = {"merge_method": merge_method}
-        if commit_title:
-            kwargs["commit_title"] = commit_title
-        if commit_message:
-            kwargs["commit_message"] = commit_message
-        result = pr.merge(**kwargs)
-        merged = result.merged if hasattr(result, "merged") else bool(result)
-        return {"number": pr.number, "merged": merged}
+        res = self.client.merge_pull(
+            self._repo_name(repo), int(number),
+            merge_method=merge_method, commit_title=commit_title, commit_message=commit_message,
+        )
+        return {"number": int(number), "merged": bool(res.get("merged"))}
 
     def create_release(
         self,
@@ -604,13 +595,12 @@ class GitHubTools:
         draft: bool = False,
         prerelease: bool = False,
     ) -> Dict[str, Any]:
-        """ساخت Release روی یک تگ (در PyGithub 2.x: create_git_release با پارامتر message)."""
-        r = self._repo(repo)
-        kwargs: Dict[str, Any] = {"name": name, "message": body, "draft": draft, "prerelease": prerelease}
-        if target_commitish:
-            kwargs["target_commitish"] = target_commitish
-        rel = r.create_git_release(tag=tag, **kwargs)
-        return {"tag": rel.tag_name, "name": rel.name, "html_url": rel.html_url}
+        """ساخت Release روی یک تگ."""
+        rel = self.client.create_release(
+            self._repo_name(repo), tag=tag, name=name, body=body,
+            target_commitish=target_commitish, draft=draft, prerelease=prerelease,
+        )
+        return {"tag": rel.get("tag_name"), "name": rel.get("name"), "html_url": rel.get("html_url")}
 
     def trigger_workflow(
         self,
@@ -619,21 +609,18 @@ class GitHubTools:
         ref: str,
         inputs: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
-        """اجرای دستی یک workflow با repository_dispatch/create_dispatch.
+        """اجرای دستی یک workflow با workflow dispatch.
 
         workflow نام فایل (مثل ci.yml) یا شناسهٔ عددی آن است؛ ref شاخهٔ هدف.
-        برای ساخت/اجرای workflow توکن باید اسکوپ workflow داشته باشد.
+        برای اجرا توکن باید اسکوپ workflow داشته باشد.
         """
-        r = self._repo(repo)
-        wf = r.get_workflow(workflow)
-        ok = wf.create_dispatch(ref=ref, inputs=inputs or {})
-        return {"workflow": workflow, "ref": ref, "dispatched": bool(ok)}
+        full = self._repo_name(repo)
+        self.client.dispatch_workflow(full, workflow, ref=ref, inputs=inputs or {})
+        return {"workflow": workflow, "ref": ref, "dispatched": True}
 
     def fork_repo(self, repo: str) -> Dict[str, Any]:
         """فورک گرفتن از یک مخزن به حساب کاربر صاحب توکن."""
-        r = self._repo(repo)
-        # در PyGithub 2.x خروجی requestJsonAndCheck تاپل (headers, data) است
-        _headers, data = self.gh.requester.requestJsonAndCheck("POST", f"{r.url}/forks")
+        data = self.client.fork_repo(self._repo_name(repo))
         return {"full_name": data.get("full_name"), "html_url": data.get("html_url")}
 
 

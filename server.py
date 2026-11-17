@@ -35,10 +35,9 @@ from checkpoint import CheckpointStore
 from api_client import APIBrain, APIError
 from deepseek_client import DeepSeekClient
 from fs_tools import register_fs_tools
+from gh_api import GhApiError
 from github_tools import (
-    GITHUB_LIB,
     GitHubTools,
-    GithubException,   # از github_tools می‌آید: با/بدون PyGithub کار می‌کند (ترموکس)
     TokenInvalidError,
     register_github_tools,
 )
@@ -82,6 +81,7 @@ class DevXState:
         self.brain: Optional[DeepSeekBrain] = None
         # مغز API: کلید فقط در حافظهٔ همین اجرا (از UI) یا از .env؛ هرگز روی دیسک نمی‌رود
         self._api_key_mem: Optional[str] = None
+        self._gh_flow = None   # جلسهٔ جاری «ورود با مرورگر» (Device Flow) — اگر فعال باشد
         self._api_base: Optional[str] = None
         self._api_model: Optional[str] = None
         self.brain_kind: Optional[str] = None   # "api" | "browser" | None
@@ -301,17 +301,21 @@ class DevXState:
     # ------------------------------------------------------------------
 
     def set_token(self, token: str) -> Dict[str, Any]:
+        """ورود کلاسیک با توکن دست‌ساز (ghp_/github_pat_). برای ورود بدون ساخت
+        هیچ کلیدی، مسیر «ورود با مرورگر» (Device Flow) در /api/github/login است."""
         token = (token or "").strip()
-        if not token.startswith("ghp_"):
-            return {"ok": False, "error": "توکن باید یک Classic Token با پیشوند ghp_ باشد (github.com/settings/tokens)."}
-        if not GITHUB_LIB:
-            return {"ok": False, "error": "کتابخانهٔ PyGithub نصب نیست — ابزارهای گیت‌هاب غیرفعال‌اند. روی ترموکس: pkg install python-cryptography python-pynacl و بعد pip install PyGithub"}
-        gh = GitHubTools(token)
+        if not (token.startswith("ghp_") or token.startswith("github_pat_") or token.startswith("gho_")):
+            return {"ok": False, "error": "توکن معتبر نیست — یا از ورود با مرورگر استفاده کن (بدون کلید) یا توکن درستی بده."}
+        return self._install_github(token)
+
+    def _install_github(self, token: str) -> Dict[str, Any]:
+        """نصب مشترک کلاینت گیت‌هاب (توکن کلاسیک یا Device Flow) + بازسازی ابزارها."""
+        gh = GitHubTools(token, api_base=config.GH_API_BASE)
         try:
             info = gh.validate_token()
         except TokenInvalidError:
-            return {"ok": False, "error": "توکن نامعتبر است (401 از GitHub) — دوباره توکن درستی وارد کن."}
-        except GithubException as e:
+            return {"ok": False, "error": "نشست نامعتبر است (401 از GitHub) — دوباره «ورود با مرورگر» را بزن یا توکن درستی بده."}
+        except GhApiError as e:
             return {"ok": False, "error": f"خطای API گیت‌هاب ({e.status}) — بعداً تلاش کن."}
         harden_github_tools(gh, self.rate_limiter, max_attempts=config.RETRY_MAX_ATTEMPTS)
         self.gh_tools = gh
@@ -320,6 +324,58 @@ class DevXState:
         self.audit.append("github_token_set", {"login": info["login"]})
         self.bus.emit("token_state", set=True, login=info["login"], scopes=info["token_scopes"])
         return {"ok": True, "login": info["login"], "scopes": info["token_scopes"]}
+
+    # ------------------------------------------------------------------
+    # ورود با مرورگر (Device Flow) — بدون ساخت هیچ کلیدی، مثل مغز دیپ‌سیک
+    # ------------------------------------------------------------------
+
+    def github_login_start(self) -> Dict[str, Any]:
+        """شروع ورود با مرورگر: کد کوتاه می‌گیرد تا کاربر در مرورگر لاگین‌شده
+        تأیید کند. خروجی برای نمایش در UI."""
+        from gh_oauth import DeviceFlow, DeviceFlowError
+        try:
+            flow = DeviceFlow(oauth_base=config.GH_OAUTH_BASE)
+            info = flow.start()
+        except DeviceFlowError as e:
+            return {"ok": False, "error": str(e)}
+        self._gh_flow = flow
+        return {
+            "ok": True,
+            "user_code": info["user_code"],
+            "verification_uri": info["verification_uri"],
+            "expires_in": info["expires_in"],
+            "message": f"در مرورگر باز کن: {info['verification_uri']} و کد {info['user_code']} را وارد کن",
+        }
+
+    def github_login_poll(self) -> Dict[str, Any]:
+        """چک وضعیت ورود با مرورگر؛ اگر تأیید شده باشد کلاینت گیت‌هاب نصب می‌شود."""
+        flow = self._gh_flow
+        if flow is None:
+            return {"ok": False, "status": "none", "error": "اول «ورود با مرورگر» را شروع کن."}
+        from gh_oauth import DeviceFlowError
+        try:
+            res = flow.poll()
+        except DeviceFlowError as e:
+            self._gh_flow = None
+            return {"ok": False, "status": "error", "error": str(e)}
+        status = res.get("status")
+        if status == "authorized":
+            token = res.get("token") or ""
+            self._gh_flow = None
+            install = self._install_github(token)
+            if install.get("ok"):
+                return {"ok": True, "status": "authorized", "login": install.get("login")}
+            return {"ok": False, "status": "error", "error": install.get("error")}
+        if status == "pending":
+            return {"ok": True, "status": "pending", "user_code": flow.user_code, "verification_uri": flow.verification_uri}
+        if status == "slow_down":
+            return {"ok": True, "status": "pending", "user_code": flow.user_code, "verification_uri": flow.verification_uri,
+                    "message": "گیت‌هاب گفت آهسته‌تر — کمی صبر"}
+        if status == "expired":
+            self._gh_flow = None
+            return {"ok": False, "status": "expired", "error": "کد ورود منقضی شد — دوباره «ورود با مرورگر» را بزن."}
+        self._gh_flow = None
+        return {"ok": False, "status": "error", "error": res.get("error", "خطای ناشناختهٔ Device Flow")}
 
     def _rebuild_registries(self) -> None:
         """رجیستری همهٔ موتورهای زنده با ابزارهای گیت‌هاب تازه بازساخته شود."""
@@ -1055,6 +1111,10 @@ class DevXHandler(BaseHTTPRequestHandler):
                 base_url=str(body.get("base_url", "")),
                 model=str(body.get("model", "")),
             ))
+        elif path == "/api/github/login":
+            self._send_json(STATE.github_login_start())
+        elif path == "/api/github/poll":
+            self._send_json(STATE.github_login_poll())
         else:
             self._send_json({"ok": False, "error": "not found"}, status=404)
 

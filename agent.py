@@ -27,7 +27,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+import time
 from getpass import getpass
 from typing import Any, Dict, List, Optional
 
@@ -40,10 +42,10 @@ from checkpoint import CheckpointStore
 from deepseek_client import DeepSeekClient
 from fs_tools import register_fs_tools
 from api_client import APIBrain, APIError
+from gh_api import GhApiError
+from gh_oauth import DeviceFlow, DeviceFlowError
 from github_tools import (
-    GITHUB_LIB,
     GitHubTools,
-    GithubException,   # از github_tools می‌آید: با/بدون PyGithub کار می‌کند (ترموکس)
     TokenInvalidError,
     register_github_tools,
 )
@@ -75,17 +77,66 @@ BANNER = r"""
 # ======================================================================
 
 def obtain_github_tools(max_attempts: Optional[int] = None) -> GitHubTools:
-    """گرفتن توکن با getpass و اعتبارسنجی با GET https://api.github.com/user.
+    """ورود گیت‌هاب در CLI — پیش‌فرض: ورود با مرورگر (Device Flow، بدون هیچ کلید).
 
-    اگر 401 برگشت، پیام واضح «توکن نامعتبر» داده می‌شود و از کاربر خواسته
-    می‌شود دوباره وارد کند (تا TOKEN_MAX_ATTEMPTS تلاش).
+    کد کوتاه نمایش داده می‌شود؛ کاربر در مرورگری که از قبل به گیت‌هاب لاگین است
+    (نشست/کوکی مرورگر) صفحهٔ github.com/login/device را باز می‌کند و کد را
+    تأیید می‌کند — همان تجربهٔ مغز دیپ‌سیک: بدون ساخت و کپی کردن توکن.
+    اگر Device Flow ممکن نشد، مسیر قدیمی توکن کلاسیک با getpass ارائه می‌شود.
     """
+    # ۱) توکن از متغیر محیطی (برای اجراهای اسکریپتی/CI — اختیاری)
+    env_token = os.getenv("GITHUB_TOKEN", "").strip()
+    if env_token:
+        gh_tools = GitHubTools(env_token)
+        try:
+            info = gh_tools.validate_token()
+            print(f"✅ توکن از GITHUB_TOKEN معتبر است — کاربر: {info['login']}\n")
+            return gh_tools
+        except (TokenInvalidError, GhApiError) as e:
+            print(f"⚠️ GITHUB_TOKEN معتبر نیست ({e}) — به ورود با مرورگر می‌رویم.\n")
+
+    # ۲) ورود با مرورگر — بدون ساخت هیچ کلیدی
+    try:
+        flow = DeviceFlow()
+        info = flow.start()
+    except DeviceFlowError as e:
+        print(f"⚠️ ورود با مرورگر ممکن نشد: {e} — به توکن کلاسیک می‌رویم.\n")
+        return _classic_token_flow(max_attempts)
+
+    print("🌐 ورود با مرورگر — بدون هیچ کلیدی:")
+    print(f"   ۱) این آدرس را در مرورگر باز کن:  {info['verification_uri']}")
+    print(f"   ۲) این کد را وارد کن:  {info['user_code']}")
+    try:
+        import webbrowser
+        webbrowser.open(info["verification_uri"])
+    except Exception:
+        pass
+    print("   ۳) منتظر تأیید تو در مرورگر")
+
+    def _sleep_tick(seconds: float) -> None:
+        print(".", end="", flush=True)
+        time.sleep(seconds)
+
+    try:
+        token = flow.wait(sleep_fn=_sleep_tick, max_s=info["expires_in"])
+    except DeviceFlowError as e:
+        print(f"\n⚠️ {e} — به توکن کلاسیک می‌رویم.\n")
+        return _classic_token_flow(max_attempts)
+    print("\n✅ در مرورگر تأیید شد!\n")
+    gh_tools = GitHubTools(token)
+    try:
+        gh_info = gh_tools.validate_token()
+    except (TokenInvalidError, GhApiError) as e:
+        print(f"⛔ نشست تأییدشده معتبر نیست: {e}")
+        sys.exit(3)
+    print(f"✅ اتصال گیت‌هاب برقرار است — کاربر: {gh_info['login']}  (اسکوپ‌ها: {gh_info['token_scopes'] or 'نامشخص'})\n")
+    return gh_tools
+
+
+def _classic_token_flow(max_attempts: Optional[int] = None) -> GitHubTools:
+    """مسیر جایگزین: توکن کلاسیک دست‌ساز با getpass (وقتی ورود با مرورگر ممکن نیست)."""
     attempts = max_attempts or config.TOKEN_MAX_ATTEMPTS
-    if not GITHUB_LIB:
-        print("⚠️ PyGithub نصب نیست — ابزارهای گیت‌هاب غیرفعال‌اند و بدون توکن ادامه می‌دهیم.")
-        print("   روی ترموکس: pkg install python-cryptography python-pynacl و بعد pip install PyGithub\n")
-        return None
-    print("🔑 برای عملیات گیت‌هاب به یک GitHub Classic Token نیاز است.")
+    print("🔑 برای عملیات گیت‌هاب به یک GitHub Token نیاز است.")
     print("   توکن را از https://github.com/settings/tokens بسازید (Generate new token (classic)).")
     print("   اسکوپ‌های حداقلی: repo  — و در صورت نیاز به Actions: workflow")
     print("   ⚠️  توکن کلاسیک به‌طور پیش‌فرض به منابع سازمان‌ها هم دسترسی دارد؛ با احتیاط بسازید و پس از کار حذف کنید.")
@@ -93,15 +144,12 @@ def obtain_github_tools(max_attempts: Optional[int] = None) -> GitHubTools:
 
     for attempt in range(1, attempts + 1):
         try:
-            token = getpass(f"GitHub Classic Token (ghp_...) [تلاش {attempt}/{attempts}]: ").strip()
+            token = getpass(f"GitHub Token [تلاش {attempt}/{attempts}]: ").strip()
         except (KeyboardInterrupt, EOFError):
             print("\nخروج.")
             sys.exit(130)
         if not token:
             print("❌ هیچ توکنی وارد نشد — دوباره تلاش کنید.\n")
-            continue
-        if token.startswith("github_pat_"):
-            print("❌ این یک Fine-grained Token است؛ طبق مشخصات، Classic Token با پیشوند ghp_ لازم است.\n")
             continue
 
         gh_tools = GitHubTools(token)  # توکن فقط در همین آبجکتِ درون‌حافظه‌ای زندگی می‌کند
@@ -110,7 +158,7 @@ def obtain_github_tools(max_attempts: Optional[int] = None) -> GitHubTools:
         except TokenInvalidError as e:
             print(f"❌ توکن نامعتبر است (401 از GitHub) — لطفاً دوباره وارد کنید. ({e})\n")
             continue
-        except GithubException as e:
+        except GhApiError as e:
             print(f"❌ خطای API گیت‌هاب ({e.status}) — لطفاً دوباره تلاش کنید.\n")
             continue
 

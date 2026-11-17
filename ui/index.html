@@ -628,19 +628,31 @@ main{display:grid;grid-template-columns:1fr 340px;gap:16px;padding:16px 22px;max
 <!-- ═══════════ مودال توکن گیت‌هاب ═══════════ -->
 <div class="overlay show" id="tokenOverlay">
   <div class="modal" id="tokenModal">
-    <h2>⬡ GitHub Classic Token</h2>
+    <h2>⬡ اتصال GitHub</h2>
     <div class="sub">
-      توکن را از <a href="https://github.com/settings/tokens" target="_blank">github.com/settings/tokens</a>
-      بساز (Generate new token (classic)) با اسکوپ‌های <b style="color:var(--yellow)">repo</b> و در صورت نیاز <b style="color:var(--yellow)">workflow</b>.
-      توکن کلاسیک به‌طور پیش‌فرض به منابع سازمان‌ها هم دسترسی دارد؛ با احتیاط بساز.
+      سریع‌ترین راه — <b style="color:var(--ok)">ورود با مرورگر</b>: هیچ کلیدی نمی‌سازی؛ در مرورگری که از قبل
+      به گیت‌هاب لاگین هستی فقط یک کد کوتاه را تأیید می‌کنی (مثل مغز دیپ‌سیک — با نشست مرورگر خودت).
     </div>
-    <input type="password" id="tokenInput" placeholder="ghp_…" autocomplete="off" spellcheck="false">
+    <button class="btn" style="width:100%;padding:10px" onclick="browserLogin()">🌐 ورود با مرورگر (بدون کلید)</button>
+    <div id="ghCodeBox" style="display:none;text-align:center;margin-top:12px">
+      <div class="sub">این کد را در صفحهٔ باز‌شده وارد کن:</div>
+      <div style="font-size:2rem;letter-spacing:.35em;font-weight:700;color:var(--ok);margin:6px 0" id="ghUserCode">----</div>
+      <div class="row" style="justify-content:center">
+        <a class="btn" id="ghVerifyLink" href="https://github.com/login/device" target="_blank" style="text-decoration:none;padding:8px 18px">باز کردن صفحهٔ تأیید</a>
+      </div>
+      <div class="sub" style="margin-top:6px">⏳ منتظر تأیید تو در مرورگر…</div>
+    </div>
+    <div class="sub" style="margin-top:14px">
+      — یا توکن دستی: از <a href="https://github.com/settings/tokens" target="_blank">github.com/settings/tokens</a>
+      بساز با اسکوپ <b style="color:var(--yellow)">repo</b> و در صورت نیاز <b style="color:var(--yellow)">workflow</b>.
+    </div>
+    <input type="password" id="tokenInput" placeholder="ghp_… یا gho_…" autocomplete="off" spellcheck="false">
     <div class="err" id="tokenErr"></div>
     <div class="row">
       <button class="btn" id="tokenSubmit" onclick="submitToken()">✓ اعتبارسنجی و اتصال</button>
       <button class="btn ghost" onclick="closeTokenModal()">فعلاً نه</button>
     </div>
-    <div class="secure"><span class="led"></span> توکن فقط در حافظهٔ همین اجرا می‌ماند — در فایل، لاگ یا کد ذخیره نمی‌شود.</div>
+    <div class="secure"><span class="led"></span> نشست/توکن فقط در حافظهٔ همین اجرا می‌ماند — در فایل، لاگ یا کد ذخیره نمی‌شود.</div>
   </div>
 </div>
 
@@ -1044,7 +1056,35 @@ async function submitToken(){
   finally{btn.disabled=false;btn.textContent='✓ اعتبارسنجی و اتصال'}
 }
 function openTokenModal(){try{sessionStorage.removeItem('dxTokenSkip')}catch(_){/*حالت ذخیره‌سازی غیرفعال*/}$('tokenOverlay').classList.add('show')}
-function closeTokenModal(){$('tokenOverlay').classList.remove('show');try{sessionStorage.setItem('dxTokenSkip','1')}catch(_){/*حالت ذخیره‌سازی غیرفعال*/}toast('info','بدون توکن گیت‌هاب هم می‌توانی از حافظه/مهارت/ابزارهای داخلی استفاده کنی. برای اتصال بعدی روی چیپ GITHUB در هدر کلیک کن.')}
+let ghPollTimer=null;
+function stopGhPoll(){if(ghPollTimer){clearInterval(ghPollTimer);ghPollTimer=null}}
+function closeTokenModal(){stopGhPoll();$('tokenOverlay').classList.remove('show');try{sessionStorage.setItem('dxTokenSkip','1')}catch(_){/*حالت ذخیره‌سازی غیرفعال*/}toast('info','بدون اتصال گیت‌هاب هم می‌توانی از حافظه/مهارت/ابزارهای داخلی استفاده کنی. برای اتصال بعدی روی چیپ GITHUB در هدر کلیک کن.')}
+/* ورود با مرورگر (Device Flow): کد می‌گیرد، کاربر در مرورگر لاگین‌شده تأیید می‌کند — بدون هیچ کلیدی */
+async function browserLogin(){
+  const err=$('tokenErr');err.textContent='';stopGhPoll();
+  try{
+    const r=await fetch('/api/github/login',{method:'POST'});const j=await r.json();
+    if(!j.ok){err.textContent=j.error||'شروع ورود ناموفق بود.';return}
+    $('ghCodeBox').style.display='block';
+    $('ghUserCode').textContent=j.user_code||'----';
+    $('ghVerifyLink').href=j.verification_uri||'https://github.com/login/device';
+    toast('info','کد گرفته شد — در مرورگر تأییدش کن',6000);
+    ghPollTimer=setInterval(async()=>{
+      try{
+        const pr=await fetch('/api/github/poll',{method:'POST'});const pj=await pr.json();
+        if(pj.ok&&pj.status==='authorized'){
+          stopGhPoll();
+          $('tokenOverlay').classList.remove('show');
+          toast('ok','اتصال گیت‌هاب برقرار شد ('+(pj.login||'')+') — بدون هیچ کلید!',7000);
+          loadState();loadGithub();
+        }else if(!pj.ok){
+          stopGhPoll();
+          err.textContent=pj.error||'ورود ناموفق بود.';
+        }
+      }catch(_){/* پول بعدی */}
+    },3000);
+  }catch(e){err.textContent='خطای ارتباط با سرور.'}
+}
 $('tokenInput')?.addEventListener('keydown',e=>{if(e.key==='Enter')submitToken()});
 
 /* ── دیپ‌سیک: ورود دستی / اتصال مجدد ─────────────────────────── */
