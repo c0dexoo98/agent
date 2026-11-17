@@ -109,7 +109,7 @@ def test_engine(tmp: Path) -> None:
     report = engine.run_task("یک تست echo اجرا کن")
 
     assert report["ok"] is True and report["answer"] == "کار تمام شد ✅"
-    assert report["rounds"] == 1 and report["tools"][0]["tool"] == "echo"
+    assert report["rounds"] == 2 and report["tools"][0]["tool"] == "echo"  # دور۱: ابزار، دور۲: پاسخ نهایی (پاس ۵: rounds = دورهای اجراشده)
     assert report["skill_learned"] == "echo-warmup"
     # حافظهٔ تسک ثبت شد
     tasks = mem.recent_tasks(1)

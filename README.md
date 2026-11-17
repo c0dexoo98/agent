@@ -178,6 +178,8 @@ python tests/test_v4_features.py     # v4: RAG/نسخهٔ مهارت/ممیزی/
 python tests/test_bugfixes.py        # رگرسیون پاس ۱ (۱۶ فیکس)
 python tests/test_bugfixes2.py       # رگرسیون پاس ۲+۳ (۱۲ تست، شامل SSE زنده)
 python tests/test_pass4.py           # پاس ۴: تایید/سندباکس/نرخ/زمان‌بند/نگهبان/اعلان (۱۳ تست)
+python tests/test_cli_runtime.py     # پاس ۵: کلاینت تعاملی CLI با FakeBrain + stdin اسکریپت‌شده
+python tests/test_soak.py            # پاس ۵: soak حافظه (~۱۰۰s: ۱۲۰ اتصال SSE + tracemalloc)
 python tests/test_stress.py          # بار همزمان: ۱۶۴ درخواست ۸-نخی + اعتبار زنجیرهٔ ممیزی
 python tests/test_server_smoke.py    # سرور واقعی: UI + API پروژه‌ها + SSE + جریان کامل تسک
 GH_TOKEN=ghp_xxx python tests/test_github_readonly.py   # فقط‌خواندنی با API واقعی
@@ -310,3 +312,18 @@ agent/
 | ۷ | 🧪 **سوئیت پاس ۴ (۱۳ تست جدید)** | پوشش مستقیم شش ماژول کم‌تست: approval (فلوی کامل/تایم‌اوت/gc/ماندگاری)، sandbox (اجرا/نشت‌نکردن توکن/تایم‌اوت/کوتاه‌سازی)، ratelimit (سطل توکن/retry/ماتریس گذرا/harden)، scheduler (parse/موعد/due-advance/ماندگاری)، webhooks (CRUD/pollBaseline-تغییر-خطا)، notifications (+سقف ۳۰۰)؛ `devx.py` (لانچر اصلی!) که صفر پوشش بود به جاروی import تست static اضافه شد |
 
 **تست‌ها:** ۹ سوئیت — static / core / projects / v4-features / bugfixes / bugfixes2 / **pass4 (جدید)** / stress / server-smoke — همه سبز. UI هم در مرورگر headless از onboarding تا تسک و داشبورد بدون حتی یک خطای کنسول اجرا شد.
+
+## 🖥 v4.5 — پاس پنجم: CLI در runtime + موبایل/XSS زنده + soak حافظه
+
+سه زاویهٔ باقی‌مانده از پاس‌های قبل: کلاینت تعاملی CLI که هرگز در runtime اجرا نشده بود، UI در ویوپورت موبایل + تلاش XSS واقعی از داخل مرورگر، و اندازه‌گیری (نه فقط مرور ایستا) رشد حافظه تحت بار.
+
+| # | یافته | شرح |
+|---|-------|-----|
+| ۱ | 🟠 **`report["rounds"]` تعداد ابزارها را می‌شمرد نه دورها** | تسکی که بدون ابزار در دور ۱ جواب می‌داد «۰ دور» گزارش می‌شد (در خط پاسخ CLI، رکورد حافظه و آمار مصرف) — `_loop` حالا دورهای اجراشده را برمی‌گرداند و هر دو مسیر run_task و resume از آن استفاده می‌کنند؛ تسکِ ابزاردار هم حالا «۲ دور» (ابزار + پاسخ) را درست نشان می‌دهد |
+| ۲ | ✅ **CLI تعاملی — اولین اجرای واقعی** | `run_cli` با FakeBrain + stdin اسکریپت‌شده: انتخاب/ساخت/سوییچ/حذف پروژه، اجرای تسک، ۱۵+ دستور منو (tools/memory/skills/sessions/schedule/watch/snapshot/persona/newsession/…)، مسیر بازگشتی با پروژهٔ موجود، و ایزولاسیون حافظه بین پروژه‌ها — همه سالم؛ نکتهٔ ظریف کشف‌شده: run_cli از `sys.argv` حالت one-shot می‌سازد (رفتار مستند، تست باید argv را کنترل کند) |
+| ۳ | ✅ **UI موبایل (RTL ۳۹۰px)** | بدون سرریز افقی، تک‌ستونه، override موبایلِ سایدبار چسبانِ پاس ۴ درست کار می‌کند، تب ممیزی کلیک‌پذیر |
+| ۴ | ✅ **XSS زنده — بلاک** | ساخت پروژه با نام `<img src=x onerror=…> <script>…</script>` از داخل مرورگر: هیچ اسکریپتی اجرا نشد (`window.__xss` تعریف‌نشده ماند) و payload به‌صورت متن خام نمایش داده شد |
+| ۵ | ✅ **اسپم Enter** | ۵ Enter پشت‌سرهم → تسک‌ها دقیقاً ترتیبی اجرا شدند (هر task_end قبل از task_start بعدی)؛ گارد busy سمت سرور بدون race |
+| ۶ | ✅ **Soak حافظه (tracemalloc)** | ۱۲۰ چرخهٔ اتصال/قطع SSE + ۳۰ تسک + ۶۰ اعلان + ۴۰ فکت + job زمان‌بند: مشترک‌های bus به baseline برگشتند (فیکس unsubscribe پاس ۴ در runtime تأیید شد)، رشد حافظه فقط ‎+۲MB کراندار، زنجیرهٔ ممیزی سالم، job با فاصلهٔ کامل فایر شد (فیکس next_run پاس ۴ در مسیر تولیدی). نکتهٔ کشف‌شده: پاک‌سازی مشترکِ قطع‌شده تا ~۳۲ ثانیه (۲ heartbeat) طول می‌کشد — کراندار، نه نشتی |
+
+**تست‌ها:** ۱۱ سوئیت — static / core / projects / v4-features / bugfixes / bugfixes2 / pass4 / **cli-runtime (جدید)** / **soak (جدید)** / stress / server-smoke — همه سبز.

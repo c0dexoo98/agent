@@ -457,7 +457,7 @@ class AgentEngine:
             self._current_trace = trace
             self.brain.new_chat()
             self._send(self._first_message(task))
-            answer, trace, errors = self._loop(task, start_round=1, trace=trace)
+            answer, trace, errors, rounds = self._loop(task, start_round=1, trace=trace)
 
             duration = time.time() - started
             task_ok = bool(answer) and not answer.startswith("⚠️")
@@ -468,7 +468,7 @@ class AgentEngine:
             lesson = self._learn_lesson(errors)
             self.memory.add_task_record(
                 task=task,
-                rounds=len(trace),
+                rounds=rounds,
                 tools_used=[t["tool"] for t in trace],
                 ok=task_ok,
                 skill_learned=skill_name,
@@ -479,7 +479,7 @@ class AgentEngine:
                 try:
                     prompt_chars = len(self._first_message(task)) + sum(len(t.get("arguments") or {}) for t in trace) * 40
                     self.usage.record(
-                        project_id=proj.get("id"), ok=task_ok, rounds=len(trace),
+                        project_id=proj.get("id"), ok=task_ok, rounds=rounds,
                         tool_calls=len(trace), duration_s=duration,
                         prompt_chars=prompt_chars, answer_chars=len(answer),
                     )
@@ -490,7 +490,7 @@ class AgentEngine:
             report = {
                 "ok": task_ok,
                 "answer": answer,
-                "rounds": len(trace),
+                "rounds": rounds,
                 "tools": trace,
                 "errors": errors,
                 "skill_learned": skill_name,
@@ -509,10 +509,17 @@ class AgentEngine:
                 self.busy = False
 
     def _loop(self, task: str, start_round: int, trace: List[Dict[str, Any]]) -> tuple:
-        """حلقهٔ ابزار از دورِ start_round تا final_answer یا سقف دورها."""
+        """حلقهٔ ابزار از دورِ start_round تا final_answer یا سقف دورها.
+
+        خروجی: (answer, trace, errors, rounds) — rounds تعداد دورهای واقعاً اجراشده
+        (باگ پاس ۵: قبلاً rounds=len(trace) بود یعنی فقط فراخوانی‌های ابزار؛ تسکی که
+        بدون ابزار در دور ۱ جواب می‌داد «۰ دور» گزارش می‌شد).
+        """
         answer = ""
         errors = 0
+        executed = 0
         for round_no in range(start_round, self.max_rounds + 1):
+            executed = round_no - start_round + 1
             self._emit("round", round=round_no, max_rounds=self.max_rounds)
             raw = self._wait()
             action = parse_model_action(raw)
@@ -567,7 +574,7 @@ class AgentEngine:
                 f"⚠️ پس از {self.max_rounds} دورِ ابزار، پاسخ نهایی کامل نشد؛ "
                 "خلاصهٔ کارهای انجام‌شده در رویدادها آمده است."
             )
-        return answer, trace, errors
+        return answer, trace, errors, executed
 
     # ------------------------------------------------------------------
     # ادامهٔ تسک از چک‌پوینت (Resume)
@@ -606,17 +613,17 @@ class AgentEngine:
                 + progress
             )
             self._send(first)
-            answer, trace, errors = self._loop(task, start_round=int(cp.get("round", 0)) + 1, trace=trace)
+            answer, trace, errors, rounds = self._loop(task, start_round=int(cp.get("round", 0)) + 1, trace=trace)
             duration = time.time() - started
             task_ok = bool(answer) and not answer.startswith("⚠️")
             self._emit("final", answer=answer, ok=task_ok)
             self.checkpoints.mark(checkpoint_id, "done" if task_ok else "failed")
             self.memory.add_task_record(
-                task=task, rounds=len(trace), tools_used=[t["tool"] for t in trace],
+                task=task, rounds=rounds, tools_used=[t["tool"] for t in trace],
                 ok=task_ok, duration_s=duration,
             )
             report = {
-                "ok": task_ok, "answer": answer, "rounds": len(trace), "tools": trace,
+                "ok": task_ok, "answer": answer, "rounds": rounds, "tools": trace,
                 "errors": errors, "skill_learned": None, "lesson_learned": None,
                 "reflection": None, "duration_s": round(duration, 1),
                 "project": dict(self.project_info), "resumed_from": checkpoint_id,
