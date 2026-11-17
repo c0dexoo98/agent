@@ -179,9 +179,16 @@ class ToolRegistry:
                     proj = self.project_provider()
                 except Exception:
                     proj = None
-            req = self.approvals.request(name, arguments, project=proj)
+            # ساخت درخواست تایید هم هرگز نباید استثنا را از execute فرار دهد (باگ پاس ۹)
+            try:
+                req = self.approvals.request(name, arguments, project=proj)
+            except Exception as e:  # noqa: BLE001
+                return {"ok": False, "error": f"ساخت درخواست تایید برای '{name}' شکست خورد: {e}"}
             if self.audit is not None:
-                self.audit.append("approval_requested", {"approval_id": req["id"], "tool": name, "arguments": arguments}, project=proj)
+                try:  # ممیزی رصد است؛ شکستش نباید جریان ابزار را بکشد (باگ پاس ۹)
+                    self.audit.append("approval_requested", {"approval_id": req["id"], "tool": name, "arguments": arguments}, project=proj)
+                except Exception:
+                    pass
             if self.on_approval_requested is not None:
                 try:
                     self.on_approval_requested({"id": req["id"], "tool": name, "arguments": arguments, "ttl": APPROVAL_TIMEOUT})
@@ -190,7 +197,10 @@ class ToolRegistry:
             # نخِ موتور تا تصمیم کاربر/TTL منتظر می‌ماند؛ در تایید، ابزار عیناً اجرا می‌شود
             decision = self.approvals.wait(req["id"], timeout_s=APPROVAL_TIMEOUT)
             if self.audit is not None:
-                self.audit.append("approval_resolved", {"approval_id": req["id"], "tool": name, "status": decision["status"]}, project=proj)
+                try:
+                    self.audit.append("approval_resolved", {"approval_id": req["id"], "tool": name, "status": decision["status"]}, project=proj)
+                except Exception:
+                    pass
             if decision["status"] != "approved":
                 reason = {
                     "rejected": "کاربر عملیات را رد کرد",

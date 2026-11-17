@@ -183,6 +183,7 @@ python tests/test_soak.py            # پاس ۵: soak حافظه (~۱۰۰s: ۱�
 python tests/test_fuzz.py            # پاس ۶: ۹۱۵ ورودی خراب به همه endpoint ها + کلاینت SSE کُند
 python tests/test_durability.py      # پاس ۷: نژ نوشتن همزمان + SIGKILL وسط کار → restart → state کامل
 python tests/test_semantics.py       # پاس ۸: شلیک زمان‌بند با ساعت جابه‌جا + صحت RAG فارسی + round-trip
+python tests/test_toolfuzz.py        # پاس ۹: ۲۸ ابزار × آرگومان خصمانه + انقضای تایید + جستجوی سراسری
 python tests/test_stress.py          # بار همزمان: ۱۶۴ درخواست ۸-نخی + اعتبار زنجیرهٔ ممیزی
 python tests/test_server_smoke.py    # سرور واقعی: UI + API پروژه‌ها + SSE + جریان کامل تسک
 GH_TOKEN=ghp_xxx python tests/test_github_readonly.py   # فقط‌خواندنی با API واقعی
@@ -373,3 +374,16 @@ agent/
 | 🟠 **تست flaky وابسته به ساعت روز** | ادعای «فردا شدن daily» در test_pass4 فقط بین ۰۰:۰۰ تا ۰۴:۰۰ UTC پاس می‌شد (>۲۰ ساعت فاصله) — باتری‌های قبلی اتفاقاً در آن پنجره اجرا شده بودند؛ با مقایسهٔ «تاریخِ دقیقِ فردا» قطعی شد |
 
 **تست‌ها:** ۱۴ سوئیت — static / core / projects / v4-features / bugfixes / bugfixes2 / pass4 / cli-runtime / soak / fuzz / durability / **semantics (جدید)** / stress / server-smoke — همه سبز (به‌علاوهٔ ۱۵ تست زندهٔ گیت‌هاب).
+
+## 🔧 v4.9 — پاس نهم: فاز آرگومان‌های خصمانهٔ ابزارها (سطح LLM) + انقضای تایید
+
+فاز پاس ۶ endpoint های HTTP را کوبید؛ این پاس لایهٔ زیرین را — ابزارهایی که خودِ مدل صدا می‌زند:
+
+| زاویه | نتیجه |
+|-------|-------|
+| 🔴 **باگ ۴۰: فرار استثنا از `registry.execute`** | ابزار خطرناک (fs_delete/run_python/run_shell/delete_skill) با آرگومان غیر-JSON (بایت خام): `ApprovalManager.request` و `audit.append` هر دو با `json.dumps` خام می‌ترکیدند و TypeError از execute فرار می‌کرد و **حلقهٔ ایجنت را می‌کشت** — برخلاف قول docstring خودش. سه‌لایه فیکس شد: `_json_safe` در مرز صف تایید، `default=repr` در `_canon` ممیزی (سازگار با هش زنجیرهٔ موجود)، و محافظ try روی هر دو `audit.append` دروازه. |
+| **فاز ۲۸×۵ ابزار** | همهٔ ابزارهای رجیستری واقعی با ۵ ورودی خصمانه (بدون آرگومان/همه-None/پیمایش مسیر/بایت خام/ایموجی+۱۰KB): ۱۴۰ اجرا → فقط خطای ساخت‌یافته یا عبور از دروازهٔ تایید؛ **صفر استثنا، صفر فرار از زندان workspace** |
+| **انقضای تایید (TTL)** | درخواست بی‌تصمیم → `timeout`؛ تایید دیرهنگام → رد؛ تصمیم همزمان در نخ جدا → `approved`؛ وضعیت‌ها بعد از reload ماندگار — همه ✔ بدون باگ |
+| **جستجوی سراسری** | بین پروژه‌ها بدون سوییچ فعال، فیلتر نوع/پروژه، تحمل memory.json خراب — ✔ بدون باگ |
+
+**تست‌ها:** ۱۵ سوئیت — static / core / projects / v4-features / bugfixes / bugfixes2 / pass4 / cli-runtime / soak / fuzz / durability / semantics / **toolfuzz (جدید)** / stress / server-smoke — همه سبز (به‌علاوهٔ ۱۵ تست زندهٔ گیت‌هاب).

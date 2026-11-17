@@ -24,6 +24,19 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _json_safe(obj: Any) -> Any:
+    """آرگومان‌های غیر-JSON (بایت/ست/شیء دلخواه) نباید ذخیره‌سازی صف را بترکانند.
+
+    باگ پاس ۹: ابزار خطرناک با آرگومان غیر-سریال‌پذیر، TypeError را از execute
+    فرار می‌داد و حلقهٔ ایجنت را می‌کشت — اینجا در مرزِ صف، مقادیر عجیب به رشته تبدیل می‌شوند.
+    """
+    try:
+        json.dumps(obj)
+        return obj
+    except TypeError:
+        return json.loads(json.dumps(obj, default=repr))
+
+
 class ApprovalManager:
     """مدیریت درخواست‌های تایید با انتظار بلوکه‌شده و TTL."""
 
@@ -68,7 +81,7 @@ class ApprovalManager:
                 "id": aid,
                 "ts": _now_iso(),
                 "tool": str(tool),
-                "arguments": arguments or {},
+                "arguments": _json_safe(arguments or {}),
                 "project": project,
                 "status": "pending",
                 "resolved_ts": None,

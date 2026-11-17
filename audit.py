@@ -26,7 +26,9 @@ def _now_iso() -> str:
 
 
 def _canon(obj: Any) -> str:
-    return json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    # default=repr: محمولهٔ غیر-JSON (بایت/ست/شیء) هرگز نباید نوشتن ممیزی را بترکاند (باگ پاس ۹)؛
+    # هش ورودی‌های قبلاً معتبر تغییری نمی‌کند چون default فقط برای مقادیر غیرقابل‌سریال صدا زده می‌شود.
+    return json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=repr)
 
 
 class AuditLog:
