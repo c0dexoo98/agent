@@ -80,6 +80,22 @@ class Scheduler:
 
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _next_after(job: Dict[str, Any], now: datetime) -> str:
+        """سرِ موعد بعدی بر اساس نوع job.
+
+        باگ پاس ۴: قبلاً همهٔ jobها (حتی daily) ۵ ثانیه بعد از ساخت می‌فایریدند —
+        jobِ «هر روز ساعت ۹» بلافاصله بعد از ساخت اجرا می‌شد. حالا:
+        interval → یک فاصلهٔ کامل بعد؛ daily → نزدیک‌ترین موعدِ at (امروز یا فردا).
+        """
+        if job.get("kind") == "daily":
+            hh, mm = str(job.get("at", "00:00")).split(":")
+            nxt = now.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
+            if nxt <= now:
+                nxt += timedelta(days=1)
+            return _iso(nxt)
+        return _iso(now + timedelta(seconds=int(job.get("every_s", 60))))
+
     def add(self, project_id: int, name: str, task: str, spec: Dict[str, Any]) -> Dict[str, Any]:
         parsed = parse_spec(spec)
         if "error" in parsed:
@@ -87,10 +103,11 @@ class Scheduler:
         with self._lock:
             job = {
                 "id": self._next_id, "project_id": int(project_id),
-                "name": (name or "job")[:60], "task": task.strip()[:400],
+                "name": (name or "job")[:60], "task": (task or "").strip()[:400],
                 **parsed, "enabled": True,
-                "last_run": None, "next_run": _iso(_now() + timedelta(seconds=5)), "run_count": 0,
+                "last_run": None, "run_count": 0,
             }
+            job["next_run"] = self._next_after(job, _now())
             self._next_id += 1
             self._jobs.append(job)
             self.save()
@@ -109,7 +126,7 @@ class Scheduler:
                 if j["id"] == int(job_id):
                     j["enabled"] = bool(enabled)
                     if enabled:
-                        j["next_run"] = _iso(_now() + timedelta(seconds=5))
+                        j["next_run"] = self._next_after(j, _now())  # نه now+5s — باگ پاس ۴
                     self.save()
                     return {"ok": True, "job": j}
         return {"ok": False, "error": "job یافت نشد"}

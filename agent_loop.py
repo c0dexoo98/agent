@@ -46,6 +46,14 @@ class EventBus:
         with self._lock:
             self._subs.append(fn)
 
+    def unsubscribe(self, fn: Callable[[str, Dict[str, Any]], None]) -> None:
+        """حذف مشترک (SSE قطع‌شده) — قبلاً سرور به _subs خصوصی دست می‌برد."""
+        with self._lock:
+            try:
+                self._subs.remove(fn)
+            except ValueError:
+                pass
+
     def emit(self, event: str, **payload: Any) -> None:
         item = {"event": event, "ts": time.time(), **payload}
         with self._lock:

@@ -124,8 +124,10 @@ header::after{ /* خط اسکن رد‌شونده */
 
 /* ── چیدمان اصلی ─────────────────────────────────────────────────── */
 main{display:grid;grid-template-columns:1fr 340px;gap:16px;padding:16px 22px;max-width:1560px;margin:0 auto}
-@media(max-width:1050px){main{grid-template-columns:1fr}}
-.side{display:flex;flex-direction:column;gap:16px;min-width:0}
+/* سایدبار چسبان با اسکرول داخلی — قبلاً محتوای پایین سایدبار (تب‌های داشبورد)
+   زیر نوار ورودیِ sticky گیر می‌کرد و در صفحه‌های کوتاه قابل‌کلیک نبود (باگ پاس ۴) */
+.side{display:flex;flex-direction:column;gap:16px;min-width:0;align-self:start;position:sticky;top:12px;max-height:calc(100vh - 24px);overflow-y:auto;padding-inline-end:6px}
+@media(max-width:1050px){main{grid-template-columns:1fr}.side{position:static;max-height:none;overflow:visible;padding-inline-end:0}}
 
 .panel{
   background:linear-gradient(180deg,var(--panel),var(--panel2));
@@ -505,7 +507,7 @@ main{display:grid;grid-template-columns:1fr 340px;gap:16px;padding:16px 22px;max
     </div>
     <button class="newchat-btn" onclick="openNewChat()">＋ چت جدید</button>
     <div class="chip" id="chipDeepseek"><i class="led"></i>DEEPSEEK <b id="dsState">—</b></div>
-    <div class="chip" id="chipGithub"><i class="led"></i>GITHUB <b id="ghState">—</b></div>
+    <div class="chip" id="chipGithub" style="cursor:pointer" title="اتصال توکن GitHub" onclick="openTokenModal()"><i class="led"></i>GITHUB <b id="ghState">—</b></div>
     <div class="chip" id="chipMemory"><i class="led"></i>MEMORY <b id="memState">0</b></div>
     <div class="chip" id="chipSkills"><i class="led"></i>SKILLS <b id="skillState">0</b></div>
     <div class="chip" id="chipTools"><i class="led"></i>TOOLS <b id="toolState">0</b></div>
@@ -907,8 +909,10 @@ async function loadState(){
     else if(!ds.ready){bar.classList.add('show');$('alertMsg').innerHTML=`<b>ورود لازم است</b> — ${esc(ds.message||'')}`;}
     else bar.classList.remove('show');
     $('sendBtn').disabled=running||!ds.ready;
-    // توکن
-    if(s.token.set){$('tokenOverlay').classList.remove('show');}
+    // توکن — بعد از «فعلاً نه» در این سشن دیگر خودکار باز نشود (باگ پاس ۴:
+    // هر رفرش state اوورلی را دوباره show می‌کرد و کل UI را می‌بست)؛
+    // بازکردن دستی: کلیک روی چیپ GITHUB در هدر
+    if(s.token.set || sessionStorage.getItem('dxTokenSkip')==='1'){$('tokenOverlay').classList.remove('show');}
     else{$('tokenOverlay').classList.add('show');}
     // پروژه‌ها — بدون پروژهٔ فعال: مودال «چت جدید + نام» خودکار باز می‌شود
     renderProject(s.project);
@@ -1038,7 +1042,8 @@ async function submitToken(){
   }catch(e){err.textContent='خطای ارتباط با سرور.'}
   finally{btn.disabled=false;btn.textContent='✓ اعتبارسنجی و اتصال'}
 }
-function closeTokenModal(){$('tokenOverlay').classList.remove('show');toast('info','بدون توکن گیت‌هاب هم می‌توانی از حافظه/مهارت/ابزارهای داخلی استفاده کنی.')}
+function openTokenModal(){try{sessionStorage.removeItem('dxTokenSkip')}catch(_){/*حالت ذخیره‌سازی غیرفعال*/}$('tokenOverlay').classList.add('show')}
+function closeTokenModal(){$('tokenOverlay').classList.remove('show');try{sessionStorage.setItem('dxTokenSkip','1')}catch(_){/*حالت ذخیره‌سازی غیرفعال*/}toast('info','بدون توکن گیت‌هاب هم می‌توانی از حافظه/مهارت/ابزارهای داخلی استفاده کنی. برای اتصال بعدی روی چیپ GITHUB در هدر کلیک کن.')}
 $('tokenInput')?.addEventListener('keydown',e=>{if(e.key==='Enter')submitToken()});
 
 /* ── دیپ‌سیک: ورود دستی / اتصال مجدد ─────────────────────────── */

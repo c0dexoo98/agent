@@ -23,7 +23,7 @@ def test_imports():
     assert hasattr(deepseek_client.DeepSeekClient, "set_on_delta")
     assert hasattr(github_tools.GitHubTools, "validate_token")
     # ماژول‌های v4
-    import approval, audit, bundles, checkpoint, fs_tools, globalsearch, notifications  # noqa: F401
+    import approval, audit, bundles, checkpoint, devx, fs_tools, globalsearch, notifications  # noqa: F401
     import rag, ratelimit, sandbox, scheduler, sessions, skills, timeline, timemachine  # noqa: F401
     import usage, web_tools, webhooks  # noqa: F401
     print("ok: imports")

@@ -993,12 +993,14 @@ class DevXHandler(BaseHTTPRequestHandler):
             except queue.Full:
                 pass
 
-        STATE.bus.subscribe(push)
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Connection", "keep-alive")
         self.end_headers()
+        # اشتراک بعد از هدرها: اگر نوشتن هدر به‌خاطر اتصال مرده خطا بدهد،
+        # مشترکِ یتیم روی bus نمی‌ماند (سخت‌گیری پاس ۴)
+        STATE.bus.subscribe(push)
 
         def write_event(item: Dict[str, Any]) -> bool:
             try:
@@ -1031,10 +1033,7 @@ class DevXHandler(BaseHTTPRequestHandler):
                         return
                     last_beat = time.time()
         finally:
-            try:
-                STATE.bus._subs.remove(push)
-            except Exception:
-                pass
+            STATE.bus.unsubscribe(push)
 
 
 def _safe_int_call(body: Dict[str, Any], key: str, fn) -> Dict[str, Any]:

@@ -147,7 +147,7 @@ def test_jobs_survive_project_delete(tmp: Path) -> None:
     from scheduler import Scheduler
 
     mgr = ProjectManager(memory_root=tmp / "mem", skills_root=tmp / "sk")
-    p1, p2, p3 = mgr.create("یک"), mgr.create("دو"), mgr.create("سه")
+    p1, _p2, p3 = mgr.create("یک"), mgr.create("دو"), mgr.create("سه")
     sch = Scheduler(tmp / "jobs.json", fire_callback=None)
     assert sch.add(p3["id"], "جاب", "تسک", {"kind": "daily", "at": "23:59"})["ok"]
     mgr.delete(p1["id"])  # قبلاً این کار p3 را از آیدی ۳ به ۲ می‌برد و جاب به «دو» اشاره می‌کرد
