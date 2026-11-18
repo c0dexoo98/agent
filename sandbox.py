@@ -36,6 +36,9 @@ def run_in_sandbox(
     (چیلدهای اسکریپت) پاکسازی شوند — با start_new_session و killpg.
     """
     timeout = int(timeout or config.SANDBOX_TIMEOUT)
+    # سقف مطلق: مدل هر عددی بدهد، بالاتر از SANDBOX_MAX_TIMEOUT صبر نمی‌کنیم —
+    # وگرنه یک درخواستِ «timeout: 3600» موتور (و سراسر سرور) را قفل می‌کرد
+    timeout = max(1, min(timeout, config.SANDBOX_MAX_TIMEOUT))
     max_output = int(max_output or config.SANDBOX_MAX_OUTPUT)
     if not argv or not isinstance(argv, list):
         return {"ok": False, "error": "argv خالی است"}
@@ -63,7 +66,23 @@ def run_in_sandbox(
                 os.killpg(proc.pid, signal.SIGKILL)
             except (ProcessLookupError, PermissionError, OSError):
                 proc.kill()
-            out, err = proc.communicate()
+            # communicate بدون timeout هرگز برنمی‌گشت اگر فرزندی write-end پایپ
+            # stdout را ارث برده باشد (start_new_session در کد کاربر) → ددلاک
+            # همیشگی موتور. حالا حداکثر ۵ ثانیه صبر و بعد پایپ‌ها را می‌بندیم.
+            out, err = "", ""
+            try:
+                out, err = proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                for stream in (proc.stdout, proc.stderr):
+                    try:
+                        if stream is not None:
+                            stream.close()
+                    except OSError:
+                        pass
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass  # زامبی هم‌راسته با پایپِ بسته دیگر موتور را نگه نمی‌دارد
             return {"ok": False, "error": f"تایم‌اوت {timeout}s — کل گروه پروسه کشته شد",
                     "timeout": timeout,
                     "stdout": (out or "")[:max_output], "stderr": (err or "")[:max_output]}

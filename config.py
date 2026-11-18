@@ -39,6 +39,22 @@ BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
 
+def _int(env_key: str, default: str) -> int:
+    """int مقاوم: مقدار خالی/خراب در .env (مثل «877O» یا «240s») هرگز بوت را
+    با traceback خام نمی‌کشد — مقدار پیش‌فرض برمی‌گردد."""
+    try:
+        return int(os.getenv(env_key, default))
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _float(env_key: str, default: str) -> float:
+    try:
+        return float(os.getenv(env_key, default))
+    except (TypeError, ValueError):
+        return float(default)
+
+
 def _bool(env_key: str, default: str = "false") -> bool:
     return os.getenv(env_key, default).strip().lower() in {"1", "true", "yes", "on"}
 
@@ -70,7 +86,7 @@ DEEPSEEK_HEADLESS: bool = _bool("DEEPSEEK_HEADLESS", "false")
 AI_API_KEY: str = os.getenv("AI_API_KEY", "").strip()
 AI_BASE_URL: str = os.getenv("AI_BASE_URL", "https://api.deepseek.com").rstrip("/")
 AI_MODEL: str = os.getenv("AI_MODEL", "deepseek-chat").strip()
-AI_TIMEOUT: int = int(os.getenv("AI_TIMEOUT", "240"))
+AI_TIMEOUT: int = _int("AI_TIMEOUT", "240")
 
 # پایه‌های گیت‌هاب (پیش‌فرض واقعی؛ فقط تست‌ها بازنویسی می‌کنند)
 GH_API_BASE: str = os.getenv("GH_API_BASE", "https://api.github.com").rstrip("/")
@@ -88,23 +104,20 @@ GH_SESSION_FILE: Path = Path(
 # ---------------------------------------------------------------------------
 
 # حداکثر تعداد دورِ ابزار در هر تسک، برای جلوگیری از حلقهٔ بی‌پایان
-MAX_ROUNDS: int = int(os.getenv("MAX_ROUNDS", "10"))
+MAX_ROUNDS: int = _int("MAX_ROUNDS", "10")
 
 # حداکثر زمان انتظار برای پاسخ کامل مدل دیپ‌سیک (ثانیه)
-RESPONSE_TIMEOUT: int = int(os.getenv("RESPONSE_TIMEOUT", "240"))
+RESPONSE_TIMEOUT: int = _int("RESPONSE_TIMEOUT", "240")
 
 # فاصلهٔ هر پول از DOM هنگام انتظار پاسخ (ثانیه)
-RESPONSE_POLL_INTERVAL: float = float(os.getenv("RESPONSE_POLL_INTERVAL", "2"))
+RESPONSE_POLL_INTERVAL: float = _float("RESPONSE_POLL_INTERVAL", "2")
 
 # چند پول متوالی باید پاسخ بدون تغییر باشد تا «کامل» تلقی شود
-RESPONSE_STABLE_CHECKS: int = int(os.getenv("RESPONSE_STABLE_CHECKS", "3"))
+RESPONSE_STABLE_CHECKS: int = _int("RESPONSE_STABLE_CHECKS", "3")
 
 # ---------------------------------------------------------------------------
-# دریافت توکن گیت‌هاب هنگام راه‌اندازی
+# گیت‌هاب — ورود فقط با Device Flow (ورود با مرورگر، بدون هیچ کلید)
 # ---------------------------------------------------------------------------
-
-# حداکثر تلاش برای وارد کردن توکن معتبر در شروع برنامه
-TOKEN_MAX_ATTEMPTS: int = int(os.getenv("TOKEN_MAX_ATTEMPTS", "3"))
 
 # آدرس API گیت‌هاب (پیش‌فرض رسمی)
 GITHUB_API_URL: str = os.getenv("GITHUB_API_URL", "https://api.github.com")
@@ -114,14 +127,14 @@ GITHUB_API_URL: str = os.getenv("GITHUB_API_URL", "https://api.github.com")
 # ---------------------------------------------------------------------------
 
 # خروجی ابزارها قبل از ارسال به دیپ‌سیک به این اندازه کوتاه می‌شود (کاراکتر)
-TOOL_RESULT_MAX_CHARS: int = int(os.getenv("TOOL_RESULT_MAX_CHARS", "20000"))
+TOOL_RESULT_MAX_CHARS: int = _int("TOOL_RESULT_MAX_CHARS", "20000")
 
 # ---------------------------------------------------------------------------
 # DevX — محیط وب ایجنت (سرور محلی + رابط HUD)
 # ---------------------------------------------------------------------------
 
 DEVX_HOST: str = os.getenv("DEVX_HOST", "127.0.0.1")
-DEVX_PORT: int = int(os.getenv("DEVX_PORT", "8770"))
+DEVX_PORT: int = _int("DEVX_PORT", "8770")
 
 # ---------------------------------------------------------------------------
 # حافظهٔ ماندگار (Memory)
@@ -130,14 +143,14 @@ DEVX_PORT: int = int(os.getenv("DEVX_PORT", "8770"))
 MEMORY_DIR: Path = Path(os.getenv("MEMORY_DIR", str(BASE_DIR / "memory"))).expanduser().resolve()
 
 # سقف تعداد آیتم‌های هر بخش حافظه (قدیمی‌ها آرشیو نمی‌شوند، حذف می‌شوند)
-MEMORY_MAX_FACTS: int = int(os.getenv("MEMORY_MAX_FACTS", "120"))
-MEMORY_MAX_LESSONS: int = int(os.getenv("MEMORY_MAX_LESSONS", "80"))
-MEMORY_MAX_TASKS: int = int(os.getenv("MEMORY_MAX_TASKS", "80"))
+MEMORY_MAX_FACTS: int = _int("MEMORY_MAX_FACTS", "120")
+MEMORY_MAX_LESSONS: int = _int("MEMORY_MAX_LESSONS", "80")
+MEMORY_MAX_TASKS: int = _int("MEMORY_MAX_TASKS", "80")
 
 # چند آیتم مرتبط از هر بخش در پرامپت تزریق شود
-MEMORY_INJECT_FACTS: int = int(os.getenv("MEMORY_INJECT_FACTS", "6"))
-MEMORY_INJECT_LESSONS: int = int(os.getenv("MEMORY_INJECT_LESSONS", "4"))
-MEMORY_INJECT_TASKS: int = int(os.getenv("MEMORY_INJECT_TASKS", "3"))
+MEMORY_INJECT_FACTS: int = _int("MEMORY_INJECT_FACTS", "6")
+MEMORY_INJECT_LESSONS: int = _int("MEMORY_INJECT_LESSONS", "4")
+MEMORY_INJECT_TASKS: int = _int("MEMORY_INJECT_TASKS", "3")
 
 # ---------------------------------------------------------------------------
 # کتابخانهٔ مهارت‌ها (Skills) — یادگیری خودکار ایجنت
@@ -152,7 +165,7 @@ AUTO_LEARN_SKILL: bool = _bool("AUTO_LEARN_SKILL", "true")
 AUTO_LEARN_LESSON: bool = _bool("AUTO_LEARN_LESSON", "true")
 
 # حداکثر مهارت‌های مرتبطی که ابتدای هر تسک به پرامپت تزریق می‌شود
-SKILLS_INJECT_LIMIT: int = int(os.getenv("SKILLS_INJECT_LIMIT", "3"))
+SKILLS_INJECT_LIMIT: int = _int("SKILLS_INJECT_LIMIT", "3")
 
 # ---------------------------------------------------------------------------
 # v4 — حافظهٔ هوشمند: RAG / Pin / Decay
@@ -163,7 +176,7 @@ RAG_ENABLED: bool = _bool("RAG_ENABLED", "true")
 
 # فراموشی هوشمند: آیتم‌های بدون استفاده و کهنه → آرشیو (از context حذف می‌شوند)
 MEMORY_DECAY_ENABLED: bool = _bool("MEMORY_DECAY_ENABLED", "true")
-MEMORY_DECAY_DAYS: int = int(os.getenv("MEMORY_DECAY_DAYS", "30"))
+MEMORY_DECAY_DAYS: int = _int("MEMORY_DECAY_DAYS", "30")
 
 # ---------------------------------------------------------------------------
 # v4 — امنیت: تایید انسانی / سندباکس / محدودسازی نرخ
@@ -172,17 +185,20 @@ MEMORY_DECAY_DAYS: int = int(os.getenv("MEMORY_DECAY_DAYS", "30"))
 # ابزارهای خطرناک قبل از اجرا باید در UI تایید شوند؟
 APPROVAL_REQUIRED: bool = _bool("APPROVAL_REQUIRED", "true")
 # چند ثانیه موتور منتظر تصمیم کاربر بماند (پس از آن «تایم‌اوت» به مدل می‌رود)
-APPROVAL_TIMEOUT: int = int(os.getenv("APPROVAL_TIMEOUT", "180"))
+APPROVAL_TIMEOUT: int = _int("APPROVAL_TIMEOUT", "180")
 # عمر درخواست‌های تایید بی‌پاسخ در صف
-APPROVAL_TTL: int = int(os.getenv("APPROVAL_TTL", "600"))
+APPROVAL_TTL: int = _int("APPROVAL_TTL", "600")
 
 # سقف‌های سندباکس اجرای کد
-SANDBOX_TIMEOUT: int = int(os.getenv("SANDBOX_TIMEOUT", "30"))
-SANDBOX_MAX_OUTPUT: int = int(os.getenv("SANDBOX_MAX_OUTPUT", "8000"))
+SANDBOX_TIMEOUT: int = _int("SANDBOX_TIMEOUT", "30")
+SANDBOX_MAX_OUTPUT: int = _int("SANDBOX_MAX_OUTPUT", "8000")
+# سقف مطلق timeout سندباکس — مدل هر عددی بدهد بالاتر از این صبر نمی‌کنیم
+# (مهار قفل‌شدن موتور روی درخواستِ «۳۶۰۰ ثانیه»)
+SANDBOX_MAX_TIMEOUT: int = _int("SANDBOX_MAX_TIMEOUT", "180")
 
 # محدودسازی نرخ گیت‌هاب + بازتلاش
-RATELIMIT_GH_PER_MIN: float = float(os.getenv("RATELIMIT_GH_PER_MIN", "60"))
-RETRY_MAX_ATTEMPTS: int = int(os.getenv("RETRY_MAX_ATTEMPTS", "3"))
+RATELIMIT_GH_PER_MIN: float = _float("RATELIMIT_GH_PER_MIN", "60")
+RETRY_MAX_ATTEMPTS: int = _int("RETRY_MAX_ATTEMPTS", "3")
 
 # ---------------------------------------------------------------------------
 # v4 — ایجنت: بازتاب / زیرایجنت / چک‌پوینت
@@ -191,7 +207,7 @@ RETRY_MAX_ATTEMPTS: int = int(os.getenv("RETRY_MAX_ATTEMPTS", "3"))
 # پس از هر تسک، مدل یک بازتاب کوتاه (چه خوب شد/چه بد شد) در حافظه ثبت کند؟
 REFLECTION_ENABLED: bool = _bool("REFLECTION_ENABLED", "true")
 # سقف دورهای حلقهٔ زیرایجنت در delegate_subtask
-SUBAGENT_MAX_ROUNDS: int = int(os.getenv("SUBAGENT_MAX_ROUNDS", "6"))
+SUBAGENT_MAX_ROUNDS: int = _int("SUBAGENT_MAX_ROUNDS", "6")
 
 # ذخیرهٔ چک‌پوینت در پایان هر دور (برای Resume بعد از قطعی)
 CHECKPOINTS_ENABLED: bool = _bool("CHECKPOINTS_ENABLED", "true")
@@ -202,9 +218,12 @@ CHECKPOINTS_ENABLED: bool = _bool("CHECKPOINTS_ENABLED", "true")
 
 # سقف context هر چت دیپ‌سیک (توکن). اگر سایت عدد دقیق‌تری اعلام کرد فقط همین را عوض کن؛
 # چون تعداد توکن واقعی از DOM خواندنی نیست، مصرف چت با «کاراکتر/۴» تخمین زده می‌شود.
-DEEPSEEK_CONTEXT_TOKENS: int = int(os.getenv("DEEPSEEK_CONTEXT_TOKENS", "1000000"))
+DEEPSEEK_CONTEXT_TOKENS: int = _int("DEEPSEEK_CONTEXT_TOKENS", "1000000")
+# سقف context برای مغزِ API — پنجرهٔ deepseek-chat (~64K) خیلی کوچک‌تر از چتِ
+# وب است؛ آستانهٔ چرخش جدا دارد تا تخمین دیر نرسد و تسک با 400 نمرده
+AI_CONTEXT_TOKENS: int = _int("AI_CONTEXT_TOKENS", "60000")
 # کِی چرخش کنیم؟ وقتی تخمینِ مصرفِ چتِ جاری از این نسبتِ سقف گذشت (۰٫۸۵ = ۸۵٪ سقف)
-ROLLOVER_AT_RATIO: float = float(os.getenv("ROLLOVER_AT_RATIO", "0.85"))
+ROLLOVER_AT_RATIO: float = _float("ROLLOVER_AT_RATIO", "0.85")
 # چرخش خودکار فعال؟ (چت جدید در سایت + انتقال راهنمای پروژه + ادامهٔ تسک از همان نقطه)
 ROLLOVER_ENABLED: bool = _bool("ROLLOVER_ENABLED", "true")
 
@@ -214,7 +233,7 @@ ROLLOVER_ENABLED: bool = _bool("ROLLOVER_ENABLED", "true")
 
 SCHEDULER_ENABLED: bool = _bool("SCHEDULER_ENABLED", "true")
 WATCHER_ENABLED: bool = _bool("WATCHER_ENABLED", "true")
-WATCH_INTERVAL_DEFAULT: int = int(os.getenv("WATCH_INTERVAL_DEFAULT", "300"))
+WATCH_INTERVAL_DEFAULT: int = _int("WATCH_INTERVAL_DEFAULT", "300")
 
 WORKSPACE_DIR: Path = Path(os.getenv("WORKSPACE_DIR", str(BASE_DIR / "workspace"))).expanduser().resolve()
 EXPORTS_DIR: Path = Path(os.getenv("EXPORTS_DIR", str(BASE_DIR / "exports"))).expanduser().resolve()

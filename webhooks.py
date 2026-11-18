@@ -161,7 +161,10 @@ class WebhookWatcher:
                     except Exception:
                         pass
             # بیدار شدن حداکثر تا نزدیک‌ترین سرِ موعد (با سقف ۳۰۰ ثانیه)
-            pending = [t - time.monotonic() for t in self._next_poll.values()]
+            try:  # remove() همزمان از request thread → RuntimeError وسط تکرار
+                pending = [t - time.monotonic() for t in self._next_poll.values()]
+            except RuntimeError:
+                pending = []
             wait_s = min(pending) if pending else 300.0
             self._stop.wait(max(5.0, min(wait_s, 300.0)))
 

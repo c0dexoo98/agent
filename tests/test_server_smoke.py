@@ -11,6 +11,7 @@ import json
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -28,8 +29,11 @@ def req(path: str, method: str = "GET", body: dict | None = None, timeout: float
         data=data, method=method,
         headers={"Content-Type": "application/json"} if data else {},
     )
-    with urllib.request.urlopen(r, timeout=timeout) as resp:
-        return resp.status, resp.read()
+    try:
+        with urllib.request.urlopen(r, timeout=timeout) as resp:
+            return resp.status, resp.read()
+    except urllib.error.HTTPError as e:  # مثل 404 مسیر حذف‌شده — بدنهٔ JSON را نگه می‌داریم
+        return e.code, e.read()
 
 
 def main() -> None:
@@ -57,10 +61,10 @@ def main() -> None:
         assert s["token"]["set"] is False and s["tools"] > 0 and s["max_rounds"] >= 1
         print(f"ok: /api/state → tools={s['tools']} memory={s['memory']['counts']}")
 
-        # ۳) توکن بدشکل باید رد شود
+        # ۳) ورود توکنی حذف شده — /api/token باید 404 ساخت‌یافته بدهد (فقط Device Flow)
         status, raw = req("/api/token", "POST", {"token": "not-a-token"})
-        assert json.loads(raw)["ok"] is False
-        print("ok: /api/token rejects malformed token")
+        assert status == 404 and json.loads(raw)["ok"] is False
+        print("ok: /api/token حذف شده → 404 (ورود فقط با مرورگر)")
 
         # ۳.۵) پروژه‌ها: ساخت با آیدی خودکار، ایزولاسیون حافظه، حذف + بازچینش آیدی
         status, raw = req("/api/projects", "POST", {"name": "تست"})

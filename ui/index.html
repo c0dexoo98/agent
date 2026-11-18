@@ -813,7 +813,7 @@ svg{flex:0 0 auto}
       <div class="view-scroll"><div class="view-inner">
         <div class="view-head">
           <h2><span class="vh-ic"><svg width="17" height="17"><use href="#i-github"/></svg></span>گیت‌هاب <span class="cnt" id="ghRate">—</span></h2>
-          <p>اتصال با ورود مرورگر (بدون هیچ کلید) یا توکن دستی؛ همهٔ عملیات از مسیر رسمی REST. سشن تا وقتی «خروج» نزنی ماندگار است.</p>
+          <p>اتصال فقط با ورود مرورگر (بدون هیچ کلید) — Device Flow رسمی گیت‌هاب؛ همهٔ عملیات از مسیر رسمی REST. سشن تا وقتی «خروج» نزنی ماندگار است.</p>
           <div class="row" style="margin-top:10px"><button class="btn ghost sm" id="ghLogoutBtn" style="display:none" onclick="ghLogout()">⏻ خروج از گیت‌هاب (پاک‌کردن سشن این دستگاه)</button></div>
         </div>
         <div id="ghBody"><div class="empty-note">در انتظار داده…</div></div>
@@ -925,12 +925,12 @@ svg{flex:0 0 auto}
   </div>
 </nav>
 
-<!-- ═══ مودال اتصال گیت‌هاب ═══ -->
+<!-- ═══ مودال اتصال گیت‌هاب — فقط ورود با مرورگر (Device Flow) ═══ -->
 <div class="overlay show" id="tokenOverlay">
   <div class="modal" id="tokenModal">
     <h2><span class="m-ic"><svg width="15" height="15"><use href="#i-github"/></svg></span>اتصال GitHub</h2>
     <div class="sub">
-      سریع‌ترین راه — <b style="color:var(--teal)">ورود با مرورگر</b>: هیچ کلیدی نمی‌سازی؛ در مرورگری که از قبل
+      تنها روش اتصال — <b style="color:var(--teal)">ورود با مرورگر</b>: هیچ کلیدی نمی‌سازی؛ در مرورگری که از قبل
       به گیت‌هاب لاگین هستی فقط یک کد کوتاه را تأیید می‌کنی (مثل مغز دیپ‌سیک — با نشست مرورگر خودت).
     </div>
     <button class="btn solid" style="width:100%;padding:11px" onclick="browserLogin()"><svg width="15" height="15"><use href="#i-globe"/></svg> ورود با مرورگر (بدون کلید)</button>
@@ -941,17 +941,11 @@ svg{flex:0 0 auto}
       <div id="ghWait" style="font-size:11px;color:var(--faint);margin-top:10px;line-height:1.9">منتظر تأیید تو در مرورگر…</div>
       <button class="btn ghost sm" id="ghRestart" style="display:none;margin-top:8px" onclick="browserLogin()">↻ شروع دوباره (کد تازه)</button>
     </div>
-    <div class="sub" style="margin-top:14px">
-      — یا توکن دستی: از <a href="https://github.com/settings/tokens" target="_blank" rel="noopener">github.com/settings/tokens</a>
-      بساز با اسکوپ <b style="color:var(--yellow)">repo</b> و در صورت نیاز <b style="color:var(--yellow)">workflow</b>.
-    </div>
-    <input type="password" id="tokenInput" placeholder="توکن گیت‌هاب (ghp_… یا gho_…)" autocomplete="off" spellcheck="false">
     <div class="err" id="tokenErr"></div>
     <div class="row">
-      <button class="btn" id="tokenSubmit" onclick="submitToken()">اعتبارسنجی و اتصال</button>
       <button class="btn ghost" onclick="closeTokenModal()">فعلاً نه</button>
     </div>
-    <div class="secure"><span class="led"></span> سشن/توکن ماندگار است: فقط روی همین دستگاه (فایل محلی با دسترسیٔ ۶۰۰) ذخیره می‌شود و با «خروج» کامل پاک می‌شود — به هیچ سرور دیگری ارسال نمی‌شود.</div>
+    <div class="secure"><span class="led"></span> سشن ماندگار است: فقط روی همین دستگاه (فایل محلی با دسترسیٔ ۶۰۰) ذخیره می‌شود و با «خروج» کامل پاک می‌شود — به هیچ سرور دیگری ارسال نمی‌شود.</div>
   </div>
 </div>
 
@@ -1548,26 +1542,7 @@ async function markNotifsRead(){
   loadNotifs();loadBell();
 }
 
-/* ── اتصال گیت‌هاب: ورود با مرورگر + توکن ──────────────────────── */
-async function submitToken(){
-  const token=$('tokenInput').value.trim(),err=$('tokenErr'),modal=$('tokenModal'),btn=$('tokenSubmit');
-  err.textContent='';
-  if(!token){err.textContent='توکن را وارد کن.';return}
-  btn.disabled=true;btn.innerHTML='<span class="spin"></span> در حال اعتبارسنجی…';
-  try{
-    const r=await fetch('/api/token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});
-    const j=await r.json();
-    if(j.ok){
-      toast('ok',`متصل شد به <b>${esc(j.login)}</b> — اسکوپ‌ها: ${esc(j.scopes||'')}`);
-      $('tokenOverlay').classList.remove('show');$('tokenInput').value='';
-      loadState();loadGithub();
-    }else{
-      err.textContent=j.error||'توکن نامعتبر است.';
-      modal.classList.remove('shake');void modal.offsetWidth;modal.classList.add('shake');
-    }
-  }catch(e){err.textContent='خطای ارتباط با سرور.'}
-  finally{btn.disabled=false;btn.textContent='اعتبارسنجی و اتصال'}
-}
+/* ── اتصال گیت‌هاب: فقط ورود با مرورگر (Device Flow) ───────────── */
 function openTokenModal(){try{sessionStorage.removeItem('dxTokenSkip')}catch(_){}$('tokenOverlay').classList.add('show')}
 let ghPollTimer=null,ghWaitTimer=null,ghPollMs=5000,ghStartTs=0,ghWaitMsg='منتظر تأیید تو در مرورگر…';
 function stopGhPoll(){
@@ -1646,7 +1621,6 @@ async function browserLogin(){
     ghPollTimer=setTimeout(pollOnce,ghPollMs);
   }catch(e){err.textContent='خطای ارتباط با سرور.'}
 }
-$('tokenInput')?.addEventListener('keydown',e=>{if(e.key==='Enter')submitToken()});
 
 /* ── مغز: ورود دستی / اتصال مجدد / کلید API ───────────────────── */
 async function manualLogin(){
@@ -1665,7 +1639,7 @@ async function setApiKey(){
     body:JSON.stringify({key:key.trim(),base_url:base.trim()})});
   const j=await r.json();
   if(j.ok){toast('ok','مغز API فعال شد ('+(j.model||'')+') — بدون مرورگر!',6000);loadState();}
-  else toast('err','کلید API پذیرفته نشد: '+(j.error||'خطای نامشخص'),8000);
+  else toast('err','کلید API پذیرفته نشد: '+esc(j.error||'خطای نامشخص'),8000);
 }
 
 /* ── اتوماسیون: زمان‌بند / نگهبان / ممیزی / چک‌پوینت ──────────── */

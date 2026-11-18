@@ -4,8 +4,8 @@
 گوشی واقعی: pip install PyGithub شکست می‌خورد چون cryptography/pynacl برای
 پایتون اندروید ویل ندارند و build از سورس Rust می‌خواهد — نتیجه: هیچ‌کدام از
 پکیج‌ها نصب نمی‌شوند. این تست دقیقاً همان حالت را با مسدودساز import می‌سازد:
-سرور باید کامل بیاید، UI سرو شود، /api/token خطای ساخت‌یافته بدهد و
-github-tools هم به‌صورت ساخت‌یافته «غیرفعال» را گزارش کند.
+سرور باید کامل بیاید، UI سرو شود، نصب گیت‌هاب (Device Flow، کلاینت REST خالص)
+کار کند و /api/token حذف‌شده 404 بدهد.
 """
 import os
 import sys
@@ -139,11 +139,12 @@ assert agent.config.MAX_ROUNDS > 0, "agent import کامل نشد"
 assert gt.GITHUB_LIB is False, "پرچم GITHUB_LIB در github_tools دیده نشد"
 import json  # noqa: E402
 import time  # noqa: E402
+import urllib.error  # noqa: E402
 import urllib.request  # noqa: E402
 
 import server as srv  # noqa: E402
 
-srv.config.GH_API_BASE = GH_FAKE   # اعتبارسنجی /api/token هم به فیک می‌رود (بدون شبکهٔ واقعی)
+srv.config.GH_API_BASE = GH_FAKE   # اعتبارسنجی گیت‌هاب هم به فیک می‌رود (بدون شبکهٔ واقعی)
 srv.STATE.deepseek_ready = False
 srv.STATE.deepseek_started = False
 srv.STATE.deepseek_message = "playwright نصب نیست"
@@ -160,19 +161,26 @@ with urllib.request.urlopen("http://127.0.0.1:8770/api/projects", timeout=10) as
     d = json.loads(r.read().decode("utf-8"))
 assert d.get("ok"), d
 
-# /api/token روی ترموکسِ بدون PyGithub حالا باید موفق باشد — کلاینت REST خالص
-req = urllib.request.Request(
+# نصب کلاینت گیت‌هاب روی ترموکسِ بدون PyGithub — همان مسیری که «ورود با مرورگر»
+# می‌رود (github_login_poll → _install_github)؛ کلاینت REST خالص باید کار کند
+res = srv.STATE._install_github("ghp_fakefaketoken123")
+assert res.get("ok") is True and res.get("login") == "termux-user", f"پاسخ نصب: {res}"
+assert srv.STATE.gh_tools is not None and srv.STATE.gh_tools.login == "termux-user"
+
+# ورود توکنی حذف شده — /api/token باید 404 بدهد (ورود فقط با Device Flow)
+req404 = urllib.request.Request(
     "http://127.0.0.1:8770/api/token",
     data=json.dumps({"token": "ghp_fakefaketoken123"}).encode("utf-8"),
     headers={"Content-Type": "application/json"}, method="POST")
-with urllib.request.urlopen(req, timeout=10) as r:
-    t = json.loads(r.read().decode("utf-8"))
-assert t.get("ok") is True and t.get("login") == "termux-user", f"پاسخ توکن: {t}"
-assert srv.STATE.gh_tools is not None and srv.STATE.gh_tools.login == "termux-user"
+try:
+    urllib.request.urlopen(req404, timeout=10)
+    raise SystemExit("/api/token باید 404 می‌داد")
+except urllib.error.HTTPError as e:
+    assert e.code == 404, e.code
 
 # وضعیت deepseek از طریق STATE/SSE می‌آید (endpoint status جدا وجود ندارد)
 assert srv.STATE.deepseek_message == "playwright نصب نیست"
-print("ok: سرور بدون playwright/PyGithub/dotenv سرو می‌دهد — UI + API + گیت‌هابِ بدون توکنِ دستی ✓")
+print("ok: سرور بدون playwright/PyGithub/dotenv سرو می‌دهد — UI + API + گیت‌هاب (Device Flow) ✓")
 s.shutdown()
 s.server_close()
 _gh.shutdown()

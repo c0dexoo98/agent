@@ -216,6 +216,10 @@ class DeepSeekClient:
         self._ctx: Optional[BrowserContext] = None
         self._page: Optional[Page] = None
         self._on_delta = None  # callback استریم جزئی پاسخ (UI زنده)
+        # بیس‌لاین پاسخِ در انتظار: تعداد بلاک‌ها لحظهٔ ارسال + متن ارسالی —
+        # تا پاسخِ «دور قبل» به‌عنوان پاسخ جدید برنگردد (باگ مکالمهٔ چنددوری)
+        self._baseline_blocks = 0
+        self._last_sent_text = ""
         # پایش مصرف context چت جاری (برای Auto Chat Rollover) — تخمین: توکن ≈ کاراکتر/۴
         self.chat_chars_sent = 0
         self.chat_chars_received = 0
@@ -270,7 +274,7 @@ class DeepSeekClient:
         termux_exe = _termux_chromium_path()
         if termux_exe:
             launch_kwargs["executable_path"] = termux_exe
-            launch_kwargs["args"] = launch_kwargs["args"] + ["--no-sandbox", "--disable-gpu"]
+            launch_kwargs["args"] = launch_kwargs["args"] + ["--no-sandbox"]
         try:
             self._ctx = self._pw.chromium.launch_persistent_context(**launch_kwargs)
         except Exception as e:  # noqa: BLE001 — مرگ درایور هنگام launch هم همان راهنما را بگیرد
@@ -279,6 +283,8 @@ class DeepSeekClient:
                 raise DeepSeekError(help_msg) from e
             raise
         self._page = self._ctx.pages[-1] if self._ctx.pages else self._ctx.new_page()
+        self._baseline_blocks = 0
+        self._last_sent_text = ""
         self._goto(self.url)
 
     def _goto(self, url: str) -> None:
@@ -340,6 +346,17 @@ class DeepSeekClient:
         if self.is_logged_in():
             return True
         if self.headless:
+            # SPA ممکن است هنوز رندر نشده باشد (بعد از goto فقط DOMContentLoaded
+            # صبر شده) — قبل از اعلام «لاگین نیست»، تا ۳۰ ثانیه فرصت می‌دهیم؛
+            # وگرنه روی سرور بدون نمایشگر، سشنِ سالم همیشه «لاگین لازم» گزارش می‌شد
+            spa_deadline = time.time() + 30
+            while time.time() < spa_deadline:
+                time.sleep(2)
+                try:
+                    if self.is_logged_in():
+                        return True
+                except Exception:
+                    continue
             raise LoginRequired(
                 "اکانت DeepSeek لاگین نیست و در حالت headless نمی‌توان دستی وارد شد — "
                 "دکمهٔ «ورود دستی» را بزن تا پنجرهٔ مرئی باز شود "
@@ -382,8 +399,20 @@ class DeepSeekClient:
             "یا پیام قبلی هنوز در حال تولید باشد."
         )
 
+    def _markdown_block_count(self) -> int:
+        """تعداد بلاک‌های `.ds-markdown--block` فعلی صفحه (خطا → ۰)."""
+        assert self._page is not None
+        try:
+            return self._page.locator(self.MARKDOWN_SELECTOR).count()
+        except Exception:
+            return 0
+
     def send_message(self, text: str) -> None:
-        """ارسال پیام: پرکردن textarea#chat-input و فشردن Enter."""
+        """ارسال پیام: پرکردن textarea#chat-input و فشردن Enter.
+
+        بلافاصله «بیس‌لاین» تعداد بلاک‌های پاسخ ثبت می‌شود تا wait_for_response
+        فقط بلاکِ «جدیدِ همین پیام» را به‌عنوان پاسخ بپذیرد — وگرنه در مکالمهٔ
+        چنددوری، پاسخ دور قبل پس از ~۶ ثانیه به‌عنوان پاسخ جدید برمی‌گشت."""
         self._wait_chat_input_ready()
         assert self._page is not None
         box = self._page.query_selector(self.CHAT_INPUT_SELECTOR)
@@ -392,7 +421,11 @@ class DeepSeekClient:
         single_line = text.replace("\r", "").replace("\n", "\\n")
         box.fill("")
         box.fill(single_line)
+        # بیس‌لاین قبل از Enter: بعضی UIها بلاک پاسخ را همان لحظهٔ keydown می‌سازند —
+        # شمردن بعد از Enter یعنی بلاکِ همین پیام در بیس‌لاین حساب می‌شد و پاسخ هرگز «جدید» نبود
+        self._baseline_blocks = self._markdown_block_count()
         box.press("Enter")
+        self._last_sent_text = single_line
         self.chat_chars_sent += len(text)
 
     def new_chat(self) -> None:
@@ -401,6 +434,8 @@ class DeepSeekClient:
         self._wait_chat_input_ready(timeout=90)
         self.chat_chars_sent = 0
         self.chat_chars_received = 0
+        self._baseline_blocks = 0
+        self._last_sent_text = ""
 
     def chat_usage(self) -> Dict[str, int]:
         """مصرف تخمینی چت جاری — برای داشبورد و تصمیم چرخش."""
@@ -414,43 +449,55 @@ class DeepSeekClient:
         """ثبت callback استریم جزئی: هر بار متن پاسخ تغییر کند صدا زده می‌شود."""
         self._on_delta = callback
 
-    def _page_mentions_limit(self) -> bool:
-        """اسکن سبک متن صفحه برای پیام‌های «سقف context پر شد» (best-effort)."""
+    def _page_mentions_limit(self, exclude: str = "") -> bool:
+        """اسکن سبک متن صفحه برای پیام‌های «سقف context پر شد» (best-effort).
+
+        متن پیامِ ارسالیِ خودمان از اسکن حذف می‌شود — اگر تسک کاربر عبارتی مثل
+        «maximum context length» را نقل کرده باشد، نباید چرخش اشتباه چت بدهد."""
         assert self._page is not None
         try:
             body = self._page.query_selector("body")
             if body is None:
                 return False
             low = (body.inner_text() or "").lower()
+            if exclude:
+                low = low.replace(exclude.lower(), "")
             return any(p in low for p in self.LIMIT_PATTERNS)
         except Exception:
             return False
 
-    def wait_for_response(self, timeout: Optional[int] = None) -> str:
-        """انتظار برای کامل شدن پاسخ آخرین پیام دستیار و برگرداندن متن آن.
+    def wait_for_response(self, timeout: Optional[int] = None, no_reply_timeout: int = 120) -> str:
+        """انتظار برای کامل شدن پاسخِ «همین پیام» و برگرداندن متن آن.
 
-        منطق تشخیص «کامل شدن»: آخرین بلاک `.ds-markdown--block` باید غیرخالی
-        باشد، چند پول متوالی بدون تغییر بماند و textarea#chat-input دوباره
-        فعال شود (حین تولید، ورودی غیرفعال است). حین تولید، تغییر متن با
-        `on_delta` به بیرون استریم می‌شود تا UI زنده تایپ کند.
+        منطق تشخیص «پاسخ جدید»: فقط بلاکی که بعد از بیس‌لاینِ ثبت‌شده در
+        send_message اضافه شده شمرده می‌شود (در مکالمهٔ چنددوری، بلاک‌های
+        پاسخ‌های قبلی نادیده گرفته می‌شوند). «کامل شدن»: متن بلاک جدید چند پول
+        متوالی بدون تغییر بماند و textarea#chat-input دوباره فعال شود (حین
+        تولید، ورودی غیرفعال است). حین تولید، تغییر متن با on_delta به بیرون
+        استریم می‌شود.
 
-        اگر مدل بدون تولیدِ هیچ بلاکِ پاسخی متوقف شد و ورودی دوباره فعال بود
-        و متن صفحه نشانه‌های سقف context داشت → ContextLimitError (موتور
-        همان را می‌گیرد و چت را می‌چرخاند).
+        اگر پیام فرستاده شد ولی هیچ بلاک جدیدی نیامد و ورودی هم فعال بود:
+        بعد از چند پول، متن صفحه از نظر الگوهای «سقف context» اسکن می‌شود →
+        ContextLimitError (موتور چت را می‌چرخاند)؛ اگر الگویی نبود و تا
+        no_reply_timeout هم پاسخی نیامد، خطای صریح می‌دهیم (به‌جای برگرداندن
+        پاسخ کهنهٔ دور قبل).
         """
         assert self._page is not None
         timeout = timeout or self.response_timeout
         deadline = time.time() + timeout
+        no_reply_deadline = time.time() + no_reply_timeout
+        baseline = self._baseline_blocks
         last_text = ""
         last_delta = ""
         stable = 0
-        empty_ready = 0
+        no_new_block = 0
         while time.time() < deadline:
+            n = 0
             text = ""
             try:
                 blocks = self._page.locator(self.MARKDOWN_SELECTOR)
                 n = blocks.count()
-                if n > 0:
+                if n > baseline:
                     text = blocks.nth(n - 1).inner_text().strip()
             except Exception:
                 text = ""
@@ -477,15 +524,23 @@ class DeepSeekClient:
                 stable = 0
                 if text:
                     last_text = text
-            if not text and input_ready:
-                # مدل تمام شد ولی هیچ پاسخی تولید نشد — احتمال پیام خطای سقف context
-                empty_ready += 1
-                if empty_ready >= 2 and self._page_mentions_limit():
+
+            if n <= baseline and input_ready:
+                # پیام فرستاده شده ولی بلاک جدیدی نیامده — یا سایت جواب نداد
+                # یا پیام خطای «سقف context» را نمایش می‌دهد (بعد از دور اول
+                # هم، چون بلاک‌های قدیمی در صفحه‌اند، از همین‌جا تشخیص می‌شود)
+                no_new_block += 1
+                if no_new_block >= 2 and self._page_mentions_limit(self._last_sent_text):
                     raise ContextLimitError(
                         "سایت دیپ‌سیک اعلام کرد context این گفت‌وگو پر است — چرخش خودکار چت لازم است."
                     )
+                if time.time() >= no_reply_deadline:
+                    raise DeepSeekError(
+                        f"پیام فرستاده شد ولی تا {no_reply_timeout} ثانیه پاسخ جدیدی از دیپ‌سیک نیامد "
+                        "(پاسخ قبلی به‌عنوان پاسخ جدید حساب نمی‌شود) — دوباره تلاش کن یا RESPONSE_TIMEOUT را چک کن."
+                    )
             else:
-                empty_ready = 0
+                no_new_block = 0
             time.sleep(self.poll_interval)
         raise ResponseTimeout(
             f"پاسخ دیپ‌سیک در {timeout} ثانیه کامل نشد (RESPONSE_TIMEOUT را در .env بیشتر کن)."

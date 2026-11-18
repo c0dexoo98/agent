@@ -59,6 +59,18 @@ class ApprovalManager:
             self._next_id = int(raw.get("next_id", len(self._items) + 1))
         except Exception:
             self._items, self._next_id = {}, 1
+        # pendingهای یتیم (کرش/ری‌استارت — دیگر کسی منتظرشان نیست) بعد از TTL
+        # می‌میرند؛ وگرنه برای همیشه در صف/UI می‌ماندند
+        try:
+            _now = __import__("time").time()
+            _ttl = __import__("config").APPROVAL_TTL
+            for it in list(self._items.values()):
+                if it.get("status") == "pending":
+                    _ts = float(it.get("ts") or it.get("created") or _now)
+                    if _now - _ts > _ttl:
+                        it["status"] = "timeout"
+        except Exception:
+            pass
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

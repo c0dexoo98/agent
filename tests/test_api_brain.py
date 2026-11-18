@@ -82,7 +82,7 @@ brain.set_on_delta(deltas.append)
 brain.send("پرامپت کامل موتور — تسک تست")
 raw = brain.wait_response()
 assert raw == ACTION_RAW, f"متن ناقص: {raw!r}"
-assert "".join(deltas) == ACTION_RAW and len(deltas) > 1, "استریم دلتا خراب است"
+assert deltas and deltas[-1] == ACTION_RAW and len(deltas) > 1, "استریم دلتا (تجمعی، مثل مغز مرورگر) خراب است"
 assert len(brain._messages) == 2 and brain._messages[1]["role"] == "assistant", "تاریخچه درست ساخته نشد"
 assert brain._messages[0]["content"] == "پرامپت کامل موتور — تسک تست"
 brain.new_chat()

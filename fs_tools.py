@@ -97,11 +97,14 @@ def _fs_list(target: Path, root: Path) -> Dict[str, Any]:
 def _fs_read(path: Path, limit: int) -> Dict[str, Any]:
     if not path.exists() or not path.is_file():
         return {"ok": False, "error": "فایل یافت نشد"}
-    text = path.read_text(encoding="utf-8", errors="replace")
+    # حداکثر limit+1 بایت می‌خوانیم — فایل چند گیگابایتی کل حافظه را نمی‌گیرد
+    with path.open("rb") as f:
+        raw = f.read(limit + 1)
+    text = raw.decode("utf-8", errors="replace")
     short = text[:limit]
-    if len(text) > limit:
-        short += f"\n... [کوتاه‌شد از {len(text)} کاراکتر]"
-    return {"ok": True, "path": path.name, "size": len(text), "content": short}
+    if len(raw) > limit:
+        short += f"\n... [کوتاه‌شد — فایل بزرگ‌تر از {limit} کاراکتر بود]"
+    return {"ok": True, "path": path.name, "size": len(raw), "content": short}
 
 
 def _fs_write(path: Path, content: str, append: bool) -> Dict[str, Any]:

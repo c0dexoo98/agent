@@ -35,7 +35,10 @@ class TimeMachine:
     def create(self, key: str, memory_dir: Path, skills_dir: Path, label: str = "", extra_files: Optional[dict] = None) -> Dict[str, Any]:
         src_mem = Path(memory_dir)
         src_sk = Path(skills_dir)
-        name = f"{_now()}-{(label or 'snapshot')[:40].strip().replace(' ', '_')}.zip"
+        # برچسب پاک‌سازی‌شده — «/» در برچسب یعنی FileNotFoundError وسط zip
+        _lbl = (label or "snapshot")[:40].strip()
+        _lbl = "".join(c if (c.isalnum() or c in "-_" or "\u0600" <= c <= "\u06FF") else "_" for c in _lbl) or "snapshot"
+        name = f"{_now()}-{_lbl}.zip"
         dest = self._dir(key) / name
         count = 0
         with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as z:

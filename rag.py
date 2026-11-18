@@ -94,7 +94,7 @@ class SemanticIndex:
     def add(self, doc_id: str, text: str) -> None:
         with self._lock:
             old = self._tf.get(str(doc_id))
-            if old:
+            if old is not None:  # Counter خالی هم falsy است — با «is not None» آیتم‌های بی‌واژه هم درست حذف/شمارش می‌شوند
                 for t in old:
                     self._df[t] -= 1
                     if self._df[t] <= 0:
@@ -111,7 +111,7 @@ class SemanticIndex:
         with self._lock:
             doc_id = str(doc_id)
             tf = self._tf.pop(doc_id, None)
-            if tf:
+            if tf is not None:
                 for t in tf:
                     self._df[t] -= 1
                     if self._df[t] <= 0:

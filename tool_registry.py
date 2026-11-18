@@ -40,6 +40,72 @@ from typing import Any, Callable, Dict, List, Optional
 
 from config import APPROVAL_TIMEOUT, TOOL_RESULT_MAX_CHARS
 
+_JSON_TYPES = {
+    "string": str,
+    "integer": int,
+    "number": (int, float),
+    "boolean": bool,
+    "array": list,
+    "object": dict,
+}
+
+
+def _json_type_name(value: Any) -> str:
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    return type(value).__name__
+
+
+def _validate_arguments(tool: "Tool", arguments: Dict[str, Any]) -> Optional[str]:
+    """اعتبارسنجی سبکِ آرگومان‌ها بر اساس JSON-Schema ثبت‌شدهٔ ابزار (زمان اجرا).
+
+    نوع propertyهای اعلام‌شده، وجود required، enum و آیتم‌های آرایه چک می‌شود؛
+    propertyهای اضافی مجازند. None یعنی معتبر. قبلاً schema فقط موقع ثبت چک
+    می‌شد و مقدار خرابِ مدل (رشته به‌جای آرایه و…) سالم به داخل ابزار می‌رفت —
+    مثلاً run_shell با argv="ls -la" حرف‌به‌حرف اجرا می‌شد."""
+    schema = getattr(tool, "parameters", None)
+    if not isinstance(schema, dict):
+        return None
+    props = schema.get("properties") or {}
+    for req in schema.get("required") or []:
+        if req not in arguments:
+            return f"پارامتر الزامی «{req}» فرستاده نشده است"
+    for key, value in arguments.items():
+        spec = props.get(key)
+        if not isinstance(spec, dict):
+            continue
+        t = spec.get("type")
+        py = _JSON_TYPES.get(t) if t else None
+        if py is not None and not isinstance(value, py):
+            return f"پارامتر «{key}» باید {t} باشد (نوع فرستاده‌شده: {_json_type_name(value)})"
+        if py is not None and t in ("integer", "number") and isinstance(value, bool):
+            return f"پارامتر «{key}» باید {t} باشد (boolean فرستادی)"
+        enum = spec.get("enum")
+        if enum and value not in enum:
+            return f"پارامتر «{key}» باید یکی از {enum} باشد"
+        if t == "array" and isinstance(value, list):
+            items = spec.get("items") or {}
+            it = items.get("type")
+            ipy = _JSON_TYPES.get(it) if it else None
+            if ipy is not None:
+                for i, item in enumerate(value):
+                    bad = not isinstance(item, ipy) or (
+                        it in ("integer", "number") and isinstance(item, bool)
+                    )
+                    if bad:
+                        return f"آیتم {i + 1} از «{key}» باید {it} باشد (نوع: {_json_type_name(item)})"
+    return None
+
 
 @dataclass
 class Tool:
@@ -171,6 +237,18 @@ class ToolRegistry:
         except KeyError as e:
             return {"ok": False, "error": str(e), "available_tools": self.names()}
 
+        # ── اعتبارسنجی schema در زمان اجرا ──
+        # schema فقط موقع ثبت چک می‌شد؛ مقدار خرابِ مدل (رشته به‌جای آرایه و…)
+        # سالم به داخل ابزار می‌رفت — مثلاً run_shell با argv="ls -la" حرف‌به‌حرف
+        # اجرا می‌شد یا fs_write با append="no" سکوتاً append می‌کرد
+        schema_err = _validate_arguments(tool, arguments)
+        if schema_err is not None:
+            return {
+                "ok": False,
+                "error": f"آرگومان‌های نامعتبر برای '{name}': {schema_err}",
+                "expected_parameters": tool.parameters.get("properties", {}),
+            }
+
         # ── دروازهٔ تایید انسانی ──
         if self._needs_approval(tool):
             proj = None
@@ -233,9 +311,14 @@ class ToolRegistry:
             return {"ok": False, "error": msg}
 
         data = self._jsonify(result)
+        # پرچم ok خودِ ابزار را بازتاب بده — اکثر ابزارها شکست را با برگرداندن
+        # {"ok": false, "error": ...} علامت می‌دهند (نه استثنا)؛ قبلاً پوششِ
+        # {"ok": true, "data": {"ok": false}} یعنی خطای ابزار «موفقیت» ثبت می‌شد.
+        # فقط «false صریح» شکست است — ابزارهای گیت‌هام ok را برنمی‌گردانند.
+        tool_ok = (data.get("ok") is not False) if isinstance(data, dict) else True
         if self.audit is not None:
-            self._audit_tool(name, arguments, {"ok": bool(data.get("ok"))})
-        return {"ok": True, "data": data}
+            self._audit_tool(name, arguments, {"ok": tool_ok})
+        return {"ok": tool_ok, "data": data}
 
     def _audit_tool(self, name: str, arguments: Dict[str, Any], outcome: Dict[str, Any]) -> None:
         """ثبت اجرای ابزار در ممیزی — خطا نباید اجرای ابزار را بکشد."""

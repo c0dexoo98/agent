@@ -44,6 +44,14 @@ def _slugify(name: str) -> str:
     return (slug or "skill")[:48]
 
 
+def _safe_int(value, default: int = 0) -> int:
+    """int مقاوم — فایل .md دست‌کاری‌شده (usage: «4.5») نباید کل پروژه را قفل کند."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 class SkillLibrary:
     """نگهداری، جستجو و آمار مهارت‌های آموخته‌شده."""
 
@@ -94,9 +102,9 @@ class SkillLibrary:
             "description": meta.get("description", ""),
             "triggers": [t.strip() for t in meta.get("triggers", "").split(",") if t.strip()],
             "created": meta.get("created", ""),
-            "usage": int(meta.get("usage", 0) or 0),
-            "success": int(meta.get("success", 0) or 0),
-            "version": int(meta.get("version", 1) or 1),
+            "usage": _safe_int(meta.get("usage"), 0),
+            "success": _safe_int(meta.get("success"), 0),
+            "version": _safe_int(meta.get("version"), 1),
             "uses": [u.strip() for u in (meta.get("uses", "") or "").split(",") if u.strip()],
             "steps": body.strip(),
         }
@@ -259,13 +267,18 @@ class SkillLibrary:
 
     def import_skill(self, path: str) -> Dict[str, Any]:
         """ورود مهارت از فایل .skill.md (مسیر کامل یا نام فایل در exports/skills)."""
+        # زندان مسیر نسبی: «..» بسته است (bypass زندان fs_tools)؛ مسیر مطلقِ
+        # موجود مجاز می‌ماند (رفتار مستند بازار مهارت) و نسبی فقط داخل exports/skills
         src = Path(path)
-        if not src.exists():
-            alt = config.EXPORTS_DIR / "skills" / path
-            if alt.exists():
-                src = alt
-            else:
+        if src.is_absolute():
+            if not src.exists():
                 return {"ok": False, "error": f"فایل یافت نشد: {path}"}
+        elif ".." in src.parts:
+            return {"ok": False, "error": "مسیر نسبی نباید «..» داشته باشد — نام فایل داخل exports/skills را بده"}
+        else:
+            src = config.EXPORTS_DIR / "skills" / src
+            if not src.exists():
+                return {"ok": False, "error": f"فایل یافت نشد در exports/skills: {path}"}
         if src.suffix.lower() != ".md":
             return {"ok": False, "error": "فقط فایل‌های Markdown (با پسوند .md) قابل ورود هستند"}
         s = self._parse(src)

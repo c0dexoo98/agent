@@ -32,6 +32,14 @@ class APIError(Exception):
         self.status = status
 
 
+class ContextLimitError(APIError):
+    """پنجرهٔ context مدل پر شده (مثلاً 400 «maximum context length»).
+
+    نامش عمداً همان نام deepseek_client.ContextLimitError است — موتور
+    (agent_loop._wait) brain-agnostic بر اساس «نام» استثنا چرخش چت را فعال
+    می‌کند؛ بدون این، تسک‌های طولانی حالت API به‌جای rollover می‌مردند."""
+
+
 def _friendly(status: int, body: str) -> str:
     """پیام خطای قابل‌فهم فارسی بر اساس کد وضعیت."""
     if status in (401, 403):
@@ -46,6 +54,22 @@ def _friendly(status: int, body: str) -> str:
         return f"خطای سرویس API ({status}) — بعداً تلاش کنید."
     snippet = (body or "").strip()[:180]
     return f"خطای API ({status}): {snippet}"
+
+
+def _looks_like_context_limit(body: str) -> bool:
+    """تشخیص «پنجرهٔ context پر شده» در بدنهٔ خطای 400 (بین سرویس‌های سازگار)."""
+    low = (body or "").lower()
+    return any(
+        p in low
+        for p in (
+            "maximum context length",
+            "context length limit",
+            "context window is full",
+            "context_length_exceeded",
+            "input length and `max_tokens` exceed context limit",
+            "too many tokens",
+        )
+    )
 
 
 class APIBrain:
@@ -72,6 +96,10 @@ class APIBrain:
         self.chat_chars_sent = 0
         self.chat_chars_received = 0
 
+    # موتور با این پرچم آستانهٔ چرخش کوچک‌تر (AI_CONTEXT_TOKENS) را برای مغز
+    # API انتخاب می‌کند — پنجرهٔ deepseek-chat خیلی کوچک‌تر از چتِ وب است
+    is_api = True
+
     # ------------------------------------------------------------------
     # رابط Brain
     # ------------------------------------------------------------------
@@ -84,8 +112,13 @@ class APIBrain:
     def new_chat(self) -> None:
         self._messages.clear()
 
+    def close(self) -> None:
+        """منبعی برای بستن نیست (شبکهٔ بدون حالت) — قرارداد مشترک با مغز مرورگر."""
+        return None
+
     def send(self, text: str) -> None:
         self._messages.append({"role": "user", "content": text})
+        self.chat_chars_sent += len(text)  # فقط پیام جدید (قبلاً کل تاریخچه در هر فراخوانی جمع می‌شد)
 
     def wait_response(self) -> str:
         """فراخوانی /chat/completions با کل تاریخچه؛ استریم SSE و جمع‌کردن دلتاها."""
@@ -128,6 +161,11 @@ class APIBrain:
                     body = e.read().decode("utf-8", "replace")
                 except Exception:
                     pass
+                if e.code == 400 and _looks_like_context_limit(body):
+                    # سقف پنجرهٔ مدل — موتور چرخش چت (rollover) را فعال می‌کند
+                    raise ContextLimitError(
+                        e.code, "پنجرهٔ context مدل پر شده — چرخش خودکار چت لازم است."
+                    ) from e
                 last_err = APIError(e.code, _friendly(e.code, body))
                 if e.code in (429, 500, 502, 503, 504) and attempt < self.retries:
                     time.sleep(2.0 * (attempt + 1))
@@ -142,14 +180,21 @@ class APIBrain:
         raise last_err or APIError(0, "خطای ناشناختهٔ API")
 
     def _chat_stream(self, payload: Dict[str, Any]) -> str:
-        """خواندن پاسخ SSE و جمع‌کردن دلتاهای content تا [DONE]."""
+        """خواندن پاسخ SSE و جمع‌کردن دلتاهای content تا [DONE].
+
+        برخی سرویس‌های «سازگار با OpenAI» استریم را نادیده می‌گیرند و یک JSON
+        کامل برمی‌گردانند — در آن حالت همان JSON را می‌خوانیم (fallback).
+        on_delta هم مثل مغز مرورگر «متن تجمعی» می‌فرستد تا UI زنده درست کار کند."""
         acc: List[str] = []
+        non_sse: List[str] = []
         resp = self._post("/chat/completions", payload, stream=True)
         try:
             with resp:
                 for raw in resp:
                     line = raw.decode("utf-8", "replace").strip()
                     if not line.startswith("data:"):
+                        if not line.startswith(":"):  # کامنت keep-alive را نگه نمی‌داریم
+                            non_sse.append(line)
                         continue
                     data = line[len("data:"):].strip()
                     if data == "[DONE]":
@@ -166,7 +211,7 @@ class APIBrain:
                         acc.append(delta)
                         if self._on_delta is not None:
                             try:
-                                self._on_delta(delta)
+                                self._on_delta("".join(acc))  # تجمعی — قرارداد مشترک با مغز مرورگر
                             except Exception:
                                 pass
         finally:
@@ -174,8 +219,20 @@ class APIBrain:
                 resp.close()
             except Exception:
                 pass
-        self.chat_chars_sent += sum(len(m.get("content") or "") for m in self._messages)
         text = "".join(acc)
+        if not text.strip() and non_sse:
+            # پاسخ غیر SSE: JSON کامل chat-completion (سرویس‌هایی که stream را رعایت نمی‌کنند)
+            try:
+                obj = json.loads("\n".join(non_sse))
+                msg = ((obj.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+                text = str(msg)
+                if text and self._on_delta is not None:
+                    try:
+                        self._on_delta(text)
+                    except Exception:
+                        pass
+            except (json.JSONDecodeError, ValueError, IndexError, AttributeError):
+                pass
         self.chat_chars_received += len(text)
         if not text.strip():
             raise APIError(0, "پاسخ خالی از API برگشت — مدل یا پایگاه را بررسی کنید.")

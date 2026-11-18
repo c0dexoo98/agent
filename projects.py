@@ -118,9 +118,13 @@ class ProjectManager:
             if any(p.get("key") == "legacy" for p in self._data["projects"]):
                 return
             self._data["default_seq"] += 1
+            # آیدی از id_seq می‌آید و آن را جلو می‌بریم — قبلاً «len+1» بود که
+            # با id_seq هم‌گام نشد → آیدی تکراری با اولین create() بعد از مهاجرت
+            # و حذف/تغییرنامِ پروژهٔ اشتباه
+            self._data["id_seq"] = max(self._data["id_seq"], len(self._data["projects"])) + 1
             rec = {
                 "key": "legacy",
-                "id": len(self._data["projects"]) + 1,
+                "id": self._data["id_seq"],
                 "name": f"پروژه {self._data['default_seq']} (مهاجرت‌شده)",
                 "created": _now_iso(),
                 "last_used": _now_iso(),
@@ -286,13 +290,16 @@ class ProjectManager:
         return self._data["active_key"]
 
     def active(self) -> Optional[Dict[str, Any]]:
-        p = self.get_by_key(self._data["active_key"])
-        if p is None and self._data["projects"]:
-            # فعالِ گم‌شده → آخرین پروژه
-            self._data["active_key"] = self._data["projects"][-1]["key"]
+        # قفلِ همان بقیهٔ نویسنده‌ها: این متد هم می‌نویسد (_save) — بدون قفل،
+        # ذخیرهٔ همزمان روی projects.json.tmp یکسان → FileNotFoundError/گم‌شدن active_key
+        with self._lock:
             p = self.get_by_key(self._data["active_key"])
-            self._save()
-        return p
+            if p is None and self._data["projects"]:
+                # فعالِ گم‌شده → آخرین پروژه
+                self._data["active_key"] = self._data["projects"][-1]["key"]
+                p = self.get_by_key(self._data["active_key"])
+                self._save()
+            return p
 
     def next_default_name(self) -> str:
         with self._lock:

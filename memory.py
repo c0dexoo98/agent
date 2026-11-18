@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 import time
@@ -46,10 +47,28 @@ class MemoryStore:
     SECTIONS = ("facts", "lessons", "tasks", "notes", "reflections")
     DECAYABLE = ("facts", "lessons", "notes")  # بخش‌های مشمول فراموشی هوشمند
 
+    _INSTANCES: Dict[str, "MemoryStore"] = {}
+    _INSTANCES_LOCK = threading.Lock()
+
+    @classmethod
+    def open(cls, memory_dir=None) -> "MemoryStore":
+        """نمونهٔ اشتراکی برای این دایرکتوری — همهٔ نویسنده‌های درون همین پروسه از
+        یک نمونه می‌گذرند؛ نمونه‌های موازی، saveهای همدیگر را بازنویسی می‌کردند
+        (تسک زمان‌بندشده در برابر حافظهٔ تعاملی)."""
+        key = str(Path(memory_dir or config.MEMORY_DIR).resolve())
+        with cls._INSTANCES_LOCK:
+            inst = cls._INSTANCES.get(key)
+            if inst is None:
+                inst = cls(memory_dir)
+                cls._INSTANCES[key] = inst
+            return inst
+
     def __init__(self, memory_dir: Optional[Path] = None) -> None:
         self.dir = Path(memory_dir or config.MEMORY_DIR)
         self.path = self.dir / "memory.json"
         self._lock = threading.RLock()
+        # mtime دیسک در آخرین همگام‌سازی — برای merge تغییرات پروسهٔ دیگر
+        self._disk_mtime = None
         self._data: Dict[str, List[Dict[str, Any]]] = {s: [] for s in self.SECTIONS}
         self._archived: List[Dict[str, Any]] = []
         # نمایهٔ برداری سبک برای بازیابی معنایی (اختیاری با RAG_ENABLED)
@@ -81,10 +100,14 @@ class MemoryStore:
             self.decay()
 
     def save(self) -> None:
-        """ذخیرهٔ اتمیک: اول در فایل موقت، بعد جایگزینی اتمی."""
+        """ذخیرهٔ اتمیک + ادغام تغییرات پروسهٔ دیگر (CLI و سرور هم‌زمان).
+
+        tmp یکتا به‌ازای پروسه/نخ (tmp مشترک → نوشتن درهم) و اگر دیسک از
+        آخرین همگام‌سازی عوض شده باشد آیتم‌های جدیدِ پروسهٔ دیگر merge می‌شوند."""
         with self._lock:
             self.dir.mkdir(parents=True, exist_ok=True)
-            tmp = self.path.with_suffix(".tmp")
+            self._merge_disk_changes()
+            tmp = self.path.with_suffix(f".tmp.{os.getpid()}.{threading.get_ident()}")
             payload = dict(self._data)
             payload["archived"] = self._archived
             tmp.write_text(
@@ -92,8 +115,39 @@ class MemoryStore:
                 encoding="utf-8",
             )
             tmp.replace(self.path)
+            try:
+                self._disk_mtime = self.path.stat().st_mtime_ns
+            except OSError:
+                pass
             if self._index is not None:
                 self._index.save()
+
+    def _merge_disk_changes(self) -> None:
+        """اگر پروسهٔ دیگری فایل را از آخرین همگام‌سازی تغییر داده باشد، آیتم‌های
+        جدیدش (idهایی که نداریم) به وضعیت خودمان اضافه می‌شوند — بازنویسی کورِ
+        کل فایل با وضعیت کهنه، دیگر پیش نمی‌آید."""
+        try:
+            mtime = self.path.stat().st_mtime_ns
+        except OSError:
+            return
+        if mtime == self._disk_mtime:
+            return
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        mine = {x.get("id") for s in self.SECTIONS for x in self._data[s]}
+        for section in self.SECTIONS:
+            disk_items = raw.get(section, [])
+            if isinstance(disk_items, list):
+                for it in disk_items:
+                    if isinstance(it, dict) and it.get("id") is not None and it.get("id") not in mine:
+                        self._data[section].append(it)
+        arch_ids = {x.get("id") for x in self._archived}
+        for it in (raw.get("archived") or []):
+            if isinstance(it, dict) and it.get("id") is not None and it.get("id") not in arch_ids:
+                self._archived.append(it)
+        self._disk_mtime = mtime
 
     # ------------------------------------------------------------------
     # افزودن آیتم
@@ -165,7 +219,11 @@ class MemoryStore:
                     "pinned": False, "tags": clean_tags}
             items.append(item)
             if len(items) > cap:
+                evicted = items[: len(items) - cap]
                 del items[: len(items) - cap]
+                if self._index is not None:  # آیتم‌های بیرون‌ریخته از نمایه هم پاک شوند
+                    for it in evicted:
+                        self._index.remove(f"{section}:{it.get('id')}")
             if self._index is not None:
                 self._index.add(f"{section}:{item['id']}", text)
             self.save()
@@ -235,11 +293,16 @@ class MemoryStore:
         with self._lock:
             return list(reversed(self._archived))[: max(1, int(limit))]
 
-    def restore_archived(self, item_ts: str) -> Dict[str, Any]:
-        """بازگرداندن یک آیتم آرشیو‌شده به بخش اصلی‌اش."""
+    def restore_archived(self, item_ts: str, item_id: Optional[int] = None) -> Dict[str, Any]:
+        """بازگرداندن یک آیتم آرشیو‌شده به بخش اصلی‌اش.
+
+        ترجیحاً با item_id (یکتا)؛ item_ts فقط برای سازگاری قدیمی — ts با
+        دقت ثانیه است و دو آیتمِ هم‌ثانیه اشتباه برمی‌گشتند."""
         with self._lock:
             for i, it in enumerate(self._archived):
-                if it.get("ts") == item_ts:
+                if (item_id is not None and it.get("id") == item_id) or (
+                    item_id is None and it.get("ts") == item_ts
+                ):
                     section = it.get("archived_from", "notes")
                     it.pop("archived_from", None)
                     it.pop("archived_at", None)
@@ -265,6 +328,16 @@ class MemoryStore:
             for section in ("facts", "lessons", "notes", "reflections"):
                 for it in self._data[section]:
                     self._index.add(f"{section}:{it.get('id')}", it.get("text", ""))
+
+    def _bump_hits(self, refs) -> None:
+        """افزایش hits چند آیتم بدون نوشتن دیسک — در save بعدی ماندگار می‌شود."""
+        with self._lock:
+            for section, item_id in refs:
+                if section not in self.SECTIONS or item_id is None:
+                    continue
+                it = self._find(section, item_id)
+                if it is not None:
+                    it["hits"] = int(it.get("hits", 0)) + 1
 
     def bump(self, section: str, item_id: int) -> None:
         """افزایش شمارندهٔ استفاده (آیتم‌های پرکاربرد در recall بالاتر می‌آیند)."""
@@ -403,6 +476,9 @@ class MemoryStore:
         """
         parts: List[str] = []
         facts = self.search(task, sections=["facts"], limit=config.MEMORY_INJECT_FACTS)
+        # ثبت «استفاده» — بدون این، decay بعد از ۳۰ روز همهٔ unpinnedها را
+        # آرشیو می‌کرد حتی پرکاربردترین‌ها (bump هیچ‌جا صدا زده نمی‌شد)
+        self._bump_hits([(f.get("section", "facts"), f.get("id")) for f in facts if f.get("id")])
         with self._lock:
             pinned = [f for f in self._data["facts"] if f.get("pinned")]
             existing = {f["text"] for f in facts}
@@ -428,6 +504,7 @@ class MemoryStore:
             lines = "\n".join(_fmt(f) for f in facts)
             parts.append(f"USER/PROJECT FACTS (always remember; 📌 = pinned by user):\n{lines}")
         lessons = self.search(task, sections=["lessons"], limit=config.MEMORY_INJECT_LESSONS)
+        self._bump_hits([(x.get("section", "lessons"), x.get("id")) for x in lessons if x.get("id")])
         if lessons:
             lines = "\n".join(f"- {l['text']}" for l in lessons)
             parts.append(f"LESSONS FROM PAST MISTAKES (follow these):\n{lines}")

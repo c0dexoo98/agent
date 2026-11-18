@@ -50,7 +50,7 @@ def export_project(
     meta = {
         "format": FORMAT_VERSION,
         "exported_at": _now(),
-        "project": {k: rec.get(k) for k in ("id", "name", "created", "last_used", "task_count", "persona")},
+        "project": {k: rec.get(k) for k in ("id", "name", "created", "last_used", "task_count", "persona", "settings")},
         "sessions": sessions_file.read_text(encoding="utf-8") if sessions_file.exists() else None,
     }
     count = 0
@@ -102,6 +102,11 @@ def import_project(zip_path: Path, project_mgr: Any, memory_root: Path, skills_r
             if meta.get("sessions"):
                 mdir.mkdir(parents=True, exist_ok=True)
                 (mdir / "sessions.json").write_text(meta["sessions"], encoding="utf-8")
+            if old.get("settings"):
+                try:
+                    project_mgr.set_settings(rec["id"], old["settings"])
+                except Exception:
+                    pass  # تنظیمات قدیمی بدون settings → مقدار پیش‌فرض
             tc = int(old.get("task_count", 0) or 0)
             if tc and rec.get("key"):
                 rec["task_count"] = tc  # rec رکورد زندهٔ پروژهٔ تازه است

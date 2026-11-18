@@ -137,8 +137,8 @@ class DevXState:
     def _memory_for(self, project: Optional[Dict[str, Any]]) -> MemoryStore:
         """حافظهٔ ایزولهٔ یک پروژه (memory/projects/<key>/)."""
         if project:
-            return MemoryStore(memory_dir=self.projects.memory_dir(project["key"]))
-        return MemoryStore(memory_dir=self.projects.memory_root / "projects" / "_unassigned")
+            return MemoryStore.open(memory_dir=self.projects.memory_dir(project["key"]))
+        return MemoryStore.open(memory_dir=self.projects.memory_root / "projects" / "_unassigned")
 
     def _skills_for(self, project: Optional[Dict[str, Any]]) -> SkillLibrary:
         if project:
@@ -199,6 +199,8 @@ class DevXState:
             checkpoints=self.checkpoints,
         )
         engine.set_registry(self._make_registry(self.gh_tools, self.memory, self.skills))
+        if "delegate_subtask" not in engine.registry.names():
+            engine.register_delegate_tool()  # بدون این، زیرایجنت فقط در CLI بود (باگ)
         p = self.projects.active()
         engine.set_project({"id": p["id"], "name": p["name"], "key": p["key"],
                             "persona": p.get("persona", "")} if p else {})
@@ -294,7 +296,15 @@ class DevXState:
         self.bus.emit("projects_updated", projects=self.projects_list(), active=self._active_pub())
         return res
 
+    _apply_lock = threading.Lock()  # سوییچ همزمان پروژه از چند request → صف
+
     def _apply_active_project(self) -> None:
+        """بازسازی موتور/حافظه/رجیستری برای پروژهٔ فعال — زیر قفل: هشت request
+        همزمان بدون قفل، set_registryهای هم‌پوشان → 500 و createهای گم‌شده."""
+        with type(self)._apply_lock:
+            self._apply_active_project_locked()
+
+    def _apply_active_project_locked(self) -> None:
         """سوییچ کامل: حافظه/مهارت/سشن‌ها/موتورها/رجیستری به پروژهٔ فعال."""
         p = self.projects.active()
         self.memory = self._memory_for(p)
@@ -312,19 +322,11 @@ class DevXState:
         return self._pub(p) if p else None
 
     # ------------------------------------------------------------------
-    # توکن گیت‌هاب + محافظت نرخ
+    # نصب کلاینت گیت‌هاب (توکن Device Flow) + محافظت نرخ
     # ------------------------------------------------------------------
 
-    def set_token(self, token: str) -> Dict[str, Any]:
-        """ورود کلاسیک با توکن دست‌ساز (ghp_/github_pat_). برای ورود بدون ساخت
-        هیچ کلیدی، مسیر «ورود با مرورگر» (Device Flow) در /api/github/login است."""
-        token = (token or "").strip()
-        if not (token.startswith("ghp_") or token.startswith("github_pat_") or token.startswith("gho_")):
-            return {"ok": False, "error": "توکن معتبر نیست — یا از ورود با مرورگر استفاده کن (بدون کلید) یا توکن درستی بده."}
-        return self._install_github(token)
-
     def _install_github(self, token: str, persist: bool = True) -> Dict[str, Any]:
-        """نصب مشترک کلاینت گیت‌هاب (توکن کلاسیک یا Device Flow) + بازسازی ابزارها.
+        """نصب کلاینت گیت‌هاب با توکنِ «ورود با مرورگر» (Device Flow) + بازسازی ابزارها.
 
         persist=True (پیش‌فرض): توکن در فایل محلی با دسترسیٔ ۶۰۰ ذخیره می‌شود تا
         بعد از بستن ترمینال/ری‌استارت هم لاگین بماند؛ «خروج» آن را کامل پاک می‌کند."""
@@ -333,7 +335,7 @@ class DevXState:
             info = gh.validate_token()
         except TokenInvalidError:
             return {"ok": False, "invalid": True,
-                    "error": "نشست نامعتبر است (401 از GitHub) — دوباره «ورود با مرورگر» را بزن یا توکن درستی بده."}
+                    "error": "نشست نامعتبر است (401 از GitHub) — دوباره «ورود با مرورگر» را بزن."}
         except GhApiError as e:
             return {"ok": False, "error": f"خطای API گیت‌هاب ({e.status}) — بعداً تلاش کن."}
         harden_github_tools(gh, self.rate_limiter, max_attempts=config.RETRY_MAX_ATTEMPTS)
@@ -509,6 +511,11 @@ class DevXState:
                         self.deepseek_message = short_error(e)
                         self.bus.emit("deepseek_state", ready=False, error=self.deepseek_message)
                         return
+                # اتصالِ سالمِ موجود → بازراه‌اندازی نکن؛ reconnect در حین تسک،
+                # مرورگر را وسط کار می‌کشت و deepseek_ready را بی‌دلیل False می‌کرد
+                if not visible_login and self.client is not None and self.deepseek_ready:
+                    self.bus.emit("deepseek_state", ready=True, message="اتصال از قبل برقرار است")
+                    return
                 try:
                     if self.client is not None:
                         self.client.close()
@@ -554,6 +561,16 @@ class DevXState:
         threading.Thread(target=connector, name="deepseek-connector", daemon=True).start()
 
     def _mark_ready(self) -> None:
+        # اگر کاربر در حین راه‌اندازیِ کُند مرورگر، مغز API فعال کرده، همان می‌ماند —
+        # اتصال دیرهنگام مرورگر نباید مغزِ فعال را بازنویسی کند
+        if self.brain is not None and getattr(self.brain, "is_api", False):
+            try:
+                if self.client is not None:
+                    self.client.close()
+                    self.client = None
+            except Exception:
+                pass
+            return
         self.deepseek_ready = True
         self.deepseek_message = "اتصال برقرار است"
         self.brain = DeepSeekBrain(self.client)
@@ -747,11 +764,13 @@ class DevXState:
             self.notifications.push("system", f"دیپ‌سیک آماده نیست — {source} اجرا نشد", body=task[:120], project=rec["id"])
             return
 
-        mem = MemoryStore(memory_dir=self.projects.memory_dir(rec["key"]))
+        mem = MemoryStore.open(memory_dir=self.projects.memory_dir(rec["key"]))
         sk = SkillLibrary(skills_dir=self.projects.skills_dir(rec["key"]))
         eng = AgentEngine(brain=self.brain, memory=mem, skills=sk, event_bus=self.bus,
                           usage=self.usage, checkpoints=self.checkpoints)
         eng.set_registry(self._make_registry_for(self.gh_tools, mem, sk, rec))
+        if "delegate_subtask" not in eng.registry.names():
+            eng.register_delegate_tool()
         eng.set_project({"id": rec["id"], "name": rec["name"], "key": rec["key"], "persona": rec.get("persona", "")})
 
         def worker() -> None:
@@ -810,6 +829,9 @@ class DevXState:
         rec = self.projects.get(int(project_id)) if project_id else self.projects.active()
         if not rec or "error" in rec:
             return {"ok": False, "error": "پروژه یافت نشد"}
+        # موتورِ در حال کار با وضعیت pre-restore در حافظه‌اش، restore را بازنویسی می‌کرد
+        if getattr(self.engine, "busy", False):
+            return {"ok": False, "error": "تسکی در حال اجراست — بعد از پایان تسک snapshot را برگردان"}
         mdir = self.projects.memory_dir(rec["key"])
         sdir = self.projects.skills_dir(rec["key"])
         # قبل از رول‌بک، وضعیت فعلی هم snapshot شود (بازگشت دوباره ممکن بماند)
@@ -933,7 +955,7 @@ class DevXState:
             "token": {
                 "set": self.token_info is not None,
                 "login": (self.token_info or {}).get("login"),
-                "scopes": (self.token_info or {}).get("scopes"),
+                "scopes": (self.token_info or {}).get("token_scopes"),
             },
             "deepseek": {
                 "started": self.deepseek_started,
@@ -1000,7 +1022,10 @@ class DevXHandler(BaseHTTPRequestHandler):
     def _read_json_body(self) -> Dict[str, Any]:
         try:
             length = int(self.headers.get("Content-Length") or 0)
-            raw = self.rfile.read(length) if length else b""
+            # منفی → read تا EOF (بلاک همیشگی) و غول‌پیکر → اشغال حافظه
+            if length <= 0 or length > 8 * 1024 * 1024:
+                return {}
+            raw = self.rfile.read(length)
             obj = json.loads(raw.decode("utf-8")) if raw else {}
             return obj if isinstance(obj, dict) else {}
         except Exception:
@@ -1139,9 +1164,8 @@ class DevXHandler(BaseHTTPRequestHandler):
     def _do_post(self) -> None:
         path = urlparse(self.path).path
         body = self._read_json_body()
-        if path == "/api/token":
-            self._send_json(STATE.set_token(str(body.get("token", ""))))
-        elif path == "/api/task":
+        # ورود گیت‌هاب فقط با «ورود با مرورگر» (Device Flow) — مسیر توکن دستی حذف شده
+        if path == "/api/task":
             self._send_json(STATE.start_task(
                 str(body.get("task", "")),
                 session_id=_int_arg(body.get("session_id")) if body.get("session_id") else None,

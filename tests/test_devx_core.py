@@ -179,8 +179,12 @@ def test_ui_and_server_files() -> None:
     ui = PROJECT_ROOT / "ui" / "index.html"
     assert ui.exists() and ui.stat().st_size > 20000, "فایل UI باید کامل باشد"
     html = ui.read_text(encoding="utf-8")
-    for token in ("DEVX", "/api/stream", "EventSource", "blink", "--teal", "--yellow", "/api/token", "sendTask"):
+    for token in ("DEVX", "/api/stream", "EventSource", "blink", "--teal", "--yellow", "browserLogin", "sendTask"):
         assert token in html, f"UI فاقد {token}"
+    # ورود گیت‌هاب فقط Device Flow — فرم توکن دستی باید کاملاً حذف شده باشد
+    assert "ورود با مرورگر" in html, "دکمهٔ ورود با مرورگر باید باشد"
+    assert 'id="tokenInput"' not in html, "فرم توکن دستی حذف نشده"
+    assert "submitToken" not in html and "/api/token" not in html, "مسیر توکن دستی حذف نشده"
     from pathlib import Path as P
     import server as srv
 

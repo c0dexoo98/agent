@@ -67,8 +67,11 @@ class PureGhClient:
         body: Optional[Dict[str, Any]] = None,
         raw_path: bool = False,
     ) -> Any:
-        """یک درخواست REST؛ خروجی JSON (204 → {}). مسیر را URL-encode می‌کند."""
-        url = self.api_base + path if raw_path else self.api_base + urllib.parse.quote(path, safe="/?=&{}")
+        """یک درخواست REST؛ خروجی JSON (204 → {}).
+        مسیر را URL-encode می‌کند — «%» هم safe است تا مقادیر ازپیش‌انکودشدهٔ
+        هلپرها (نام شاخه با «/»، مسیر فایل فارسی) دوباره انکود نشوند؛
+        دابل‌انکودینگ یعنی 404 برای هر شاخهٔ feature/* یا فایل غیر ASCII."""
+        url = self.api_base + path if raw_path else self.api_base + urllib.parse.quote(path, safe="/?=&{}%")
         if params:
             sep = "&" if "?" in url else "?"
             url = url + sep + urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
@@ -126,8 +129,8 @@ class PureGhClient:
     def get_repo(self, full_name: str) -> Dict[str, Any]:
         return self.request("GET", f"/repos/{full_name}")
 
-    def list_branches(self, full_name: str, per_page: int = 100) -> List[Dict[str, Any]]:
-        return self.request("GET", f"/repos/{full_name}/branches", params={"per_page": per_page})
+    def list_branches(self, full_name: str, per_page: int = 100, page: int = 1) -> List[Dict[str, Any]]:
+        return self.request("GET", f"/repos/{full_name}/branches", params={"per_page": per_page, "page": page})
 
     def get_branch(self, full_name: str, branch: str) -> Dict[str, Any]:
         return self.request("GET", f"/repos/{full_name}/branches/{urllib.parse.quote(branch, safe='')}")
@@ -179,8 +182,8 @@ class PureGhClient:
     # Issues
     # ------------------------------------------------------------------
 
-    def list_issues(self, full_name: str, state: str = "open", per_page: int = 100) -> List[Dict[str, Any]]:
-        return self.request("GET", f"/repos/{full_name}/issues", params={"state": state, "per_page": per_page})
+    def list_issues(self, full_name: str, state: str = "open", per_page: int = 100, page: int = 1) -> List[Dict[str, Any]]:
+        return self.request("GET", f"/repos/{full_name}/issues", params={"state": state, "per_page": per_page, "page": page})
 
     def get_issue(self, full_name: str, number: int) -> Dict[str, Any]:
         return self.request("GET", f"/repos/{full_name}/issues/{int(number)}")

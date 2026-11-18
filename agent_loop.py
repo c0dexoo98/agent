@@ -89,6 +89,13 @@ class DeepSeekBrain:
     def wait_response(self) -> str:
         return self.client.wait_for_response()
 
+    def close(self) -> None:
+        """بستن مرورگرِ زیرین (قرارداد مشترک با APIBrain برای shutdown تمیز)."""
+        try:
+            self.client.close()
+        except Exception:
+            pass
+
 
 class FakeBrain:
     """مغز اسکریپت‌شده برای تست آفلاین موتور — پاسخ‌ها را به‌ترتیب می‌خواند.
@@ -336,14 +343,22 @@ class AgentEngine:
         return self._chat_chars // 4
 
     def _rollover_threshold(self) -> int:
+        # مغز API پنجرهٔ کوچک‌تری از چتِ وب دارد (deepseek-chat ~64K در برابر 1M)
+        # — آستانهٔ جدا برای آن تا تخمینِ چرخش هرگز دیر نرسد
+        if getattr(self.brain, "is_api", False):
+            return int(config.AI_CONTEXT_TOKENS * config.ROLLOVER_AT_RATIO)
         return int(config.DEEPSEEK_CONTEXT_TOKENS * config.ROLLOVER_AT_RATIO)
 
     def _handoff_message(self, reason: str) -> str:
-        """پیام انتقال: راهنمای کامل پروژه (persona + حافظه + مهارت‌ها) + خلاصهٔ پیشرفت.
+        """پیام انتقال: system prompt کامل (ابزارها + پروتکل) + راهنمای پروژه
+        (persona + حافظه + مهارت‌ها) + خلاصهٔ پیشرفت.
 
         این پیام در چتِ تازه ساخته‌شده در سایت ارسال می‌شود تا مکالمه از همان
         نقطه‌ای که سقف پر شد بی‌وقفه ادامه یابد — مدل هیچ‌چیز را از دست نمی‌دهد.
-        """
+
+        system prompt حتماً همراه می‌رود: چتِ تازه هیچ حافظه‌ای از فهرست ابزارها
+        و فرمت پاسخ {"tool":..., "arguments":...} ندارد؛ بدون آن مدل با نثر
+        آزاد جواب می‌داد و پروتکل می‌شکست (باگ: lobotomized-after-rollover)."""
         task = self._current_task
         trace = self._current_trace or []
         proj = dict(self.project_info)
@@ -354,6 +369,7 @@ class AgentEngine:
             for t in recent
         )
         parts = [
+            self._system_prompt(),  # ابزارها + پروتکل JSON — بدون آن چت جدید ناتوان است
             "[SYSTEM — CHAT ROLLOVER]",
             (
                 f"The previous DeepSeek chat reached its context limit (trigger: {reason}). "
@@ -393,7 +409,12 @@ class AgentEngine:
         self.brain.new_chat()
         handoff = self._handoff_message(reason)
         if pending:
-            handoff = handoff + "\n\n=== CONTINUE WITH THIS PENDING MESSAGE ===\n" + pending
+            if "[SYSTEM — CHAT ROLLOVER]" in pending and self._rollovers >= 1:
+                # pending خودش handoff دور قبل است — تزریق دوباره‌اش یعنی لانه‌شدن
+                # بی‌پایان handoff در handoff؛ فقط ادامهٔ کوتاه می‌فرستیم
+                handoff = handoff + "\n\n=== CONTINUE ===\nContinue the task from where the previous chat stopped (see progress above)."
+            else:
+                handoff = handoff + "\n\n=== CONTINUE WITH THIS PENDING MESSAGE ===\n" + pending
         self.brain.send(handoff)
         self._chat_chars += len(handoff)
         self._last_sent = handoff
@@ -419,17 +440,26 @@ class AgentEngine:
         self._last_sent = text
 
     def _wait(self) -> str:
-        """انتظار پاسخ؛ اگر سایت خطای سقف context داد → چرخش و تکرار آخرین پیام."""
-        try:
-            raw = self.brain.wait_response()
-        except Exception as e:  # noqa: BLE001
-            # brain-agnostic: هر استثنایی با نام ContextLimitError = سقف context سایت
-            if type(e).__name__ != "ContextLimitError":
-                raise
-            self._rollover(reason="site_error", pending=self._last_sent)
-            raw = self.brain.wait_response()
-        self._chat_chars += len(raw or "")
-        return raw
+        """انتظار پاسخ؛ اگر سایت/API خطای سقف context داد → چرخش و تکرار.
+
+        تا ۵ چرخش در یک تسک؛ بیشتر از آن یعنی خودِ پیام انتقال از سقف بزرگ‌تر
+        است — با خطای روشن می‌بندیم تا حلقهٔ بی‌پایان چرخش شکل نگیرد."""
+        while True:
+            try:
+                raw = self.brain.wait_response()
+                self._chat_chars += len(raw or "")
+                return raw
+            except Exception as e:  # noqa: BLE001
+                # brain-agnostic: هر استثنایی با نام ContextLimitError = سقف context
+                # (هم سایت دیپ‌سیک، هم APIBrain که 400 «context length» را همین می‌کند)
+                if type(e).__name__ != "ContextLimitError":
+                    raise
+                if self._rollovers >= 5:
+                    raise RuntimeError(
+                        "چرخش خودکار چت بیش از ۵ بار در همین تسک تکرار شد — "
+                        "پیام انتقال از سقف context بزرگ‌تر است؛ تسک را به دو بخش کوچک‌تر بشکن."
+                    ) from e
+                self._rollover(reason="site_error", pending=self._last_sent)
 
     # ------------------------------------------------------------------
     # اجرای تسک
@@ -534,7 +564,23 @@ class AgentEngine:
                 break
 
             tool_name = str(action.get("tool") or "").strip()
-            arguments = dict(action.get("arguments") or {})
+            args_raw = action.get("arguments")
+            if args_raw is not None and not isinstance(args_raw, dict):
+                # خطای رایج مدل: «arguments» به‌صورت رشته/لیست — قبلاً dict() روی
+                # آن ValueError می‌داد و کل تسک می‌مرد؛ حالا مثل خطای ابزار به
+                # مدل برمی‌گردد تا در دور بعد اصلاح کند
+                self._emit("tool_call", round=round_no, tool=tool_name, arguments={})
+                result = {
+                    "ok": False,
+                    "error": '«arguments» باید آبجکت JSON باشد — دوباره با {"tool": ..., "arguments": {...}} بفرست.',
+                }
+                errors += 1
+                preview = json.dumps(result, ensure_ascii=False)[:160]
+                self._emit("tool_result", tool=tool_name, ok=False, preview=preview)
+                trace.append({"round": round_no, "tool": tool_name, "arguments": {}, "ok": False})
+                self._send(f"TOOL_RESULT {tool_name}:\n" + json.dumps(result, ensure_ascii=False))
+                continue
+            arguments = dict(args_raw or {})
             if not tool_name:
                 answer = raw
                 break
@@ -570,10 +616,25 @@ class AgentEngine:
             # نزدیکِ سقف context؟ → چرخش خودکار چت + ادغام این نتیجه در پیام انتقال
             self._send(payload)
         else:
-            answer = (
-                f"⚠️ پس از {self.max_rounds} دورِ ابزار، پاسخ نهایی کامل نشد؛ "
-                "خلاصهٔ کارهای انجام‌شده در رویدادها آمده است."
-            )
+            # دورها تمام شد ولی پاسخِ آخرین TOOL_RESULT هنوز خوانده نشده — مدل
+            # معمولاً همان‌جا {"final_answer": ...} می‌دهد؛ بدون این انتظارِ نهایی،
+            # پاسخ نهاییِ موفق گم می‌شد و تسکِ موفق «ناقص» ثبت می‌شد
+            try:
+                raw = self._wait()
+                action = parse_model_action(raw)
+                if action is None:
+                    answer = raw
+                elif "final_answer" in action:
+                    answer = str(action.get("final_answer") or "").strip() or raw
+                elif action.get("tool"):
+                    answer = ""
+            except Exception:  # noqa: BLE001 — انتظار نهایی اختیاری است؛ نباید تسک را بکشد
+                answer = ""
+            if not answer:
+                answer = (
+                    f"⚠️ پس از {self.max_rounds} دورِ ابزار، پاسخ نهایی کامل نشد؛ "
+                    "خلاصهٔ کارهای انجام‌شده در رویدادها آمده است."
+                )
         return answer, trace, errors, executed
 
     # ------------------------------------------------------------------

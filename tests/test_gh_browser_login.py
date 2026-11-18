@@ -13,6 +13,7 @@ import json
 import sys
 import threading
 import time
+import urllib.error  # noqa: F401 — HTTPError برای چک 404 مسیر حذف‌شده
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -337,17 +338,21 @@ assert srvmod.STATE.gh_tools.login == "octocat"
 # ابزار نصب‌شده (harden‌شده) واقعاً کار می‌کند
 assert srvmod.STATE.gh_tools.get_rate_limit()["remaining"] == 4999
 
-req = urllib.request.Request("http://127.0.0.1:8770/api/token",
-                             data=json.dumps({"token": TOKEN}).encode("utf-8"),
-                             headers={"Content-Type": "application/json"}, method="POST")
-with urllib.request.urlopen(req, timeout=15) as r:
-    tok = json.loads(r.read().decode())
-assert tok.get("ok") and tok.get("login") == "octocat", tok
+# ورود توکنی حذف شده — /api/token باید 404 بدهد (تنها مسیر ورود: Device Flow)
+req404 = urllib.request.Request(
+    "http://127.0.0.1:8770/api/token",
+    data=json.dumps({"token": TOKEN}).encode("utf-8"),
+    headers={"Content-Type": "application/json"}, method="POST")
+try:
+    urllib.request.urlopen(req404, timeout=15)
+    raise SystemExit("/api/token باید 404 می‌داد")
+except urllib.error.HTTPError as e:
+    assert e.code == 404, e.code
 
 # poll بدون جلسهٔ فعال → خطای ساخت‌یافته
 none_flow = srvmod.STATE.github_login_poll()
 assert none_flow.get("ok") is False and none_flow.get("status") == "none", none_flow
-print("✅ ۱۰) github_login_start/poll → نصب ابزارها + /api/token با gho_ + poll بدون جلسه")
+print("✅ ۱۰) github_login_start/poll → نصب ابزارها + /api/token حذف‌شده (404) + poll بدون جلسه")
 
 # ─── ۱۱) تاب‌آوری جریان: خطای گذرای شبکه جریان را نمی‌کشد ───────────────────
 # سناریوی واقعی موبایل: کاربر در تب گیت‌هاب است، شبکه/سرور لحظه‌ای می‌پرد؛

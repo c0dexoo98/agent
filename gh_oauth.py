@@ -128,10 +128,19 @@ class DeviceFlow:
         return {"status": "error", "error": friendly}
 
     def wait(self, sleep_fn: Callable[[float], None] = time.sleep, max_s: int = 900) -> str:
-        """حلقهٔ سادهٔ منتظر-ماندن تا مجوز (برای CLI و تست‌ها)؛ توکن یا خطا."""
+        """حلقهٔ منتظر-ماندن تا مجوز (برای CLI و تست‌ها)؛ توکن یا خطا.
+
+        خطای گذرای شبکه (قطع لحظه‌ای Wi-Fi/پروکسی) جریان را نمی‌کشد —
+        device_code در گیت‌هاب معتبر مانده و پول بعدی ادامه می‌دهد (RFC 8628 §3.5)؛
+        کاربر ممکن است همین حالا در حال تأیید کد در مرورگر باشد."""
         deadline = time.monotonic() + min(max_s, self.expires_in + 30)
         while time.monotonic() < deadline:
-            res = self.poll()
+            try:
+                res = self.poll()
+            except DeviceFlowError:
+                # خطای گذرای شبکه/مهلت درخواست — کد را دور نمی‌ریزیم
+                sleep_fn(min(self.interval, 10.0))
+                continue
             if res["status"] == "authorized":
                 return res["token"]
             if res["status"] == "error":

@@ -9,9 +9,8 @@
   * تاریخچهٔ تسک‌ها و آمار موفقیت را نگه می‌دارد
 
 چرخهٔ کار CLI:
-  ۱) دریافت GitHub Classic Token با getpass (github.com/settings/tokens —
-     اسکوپ‌های repo و در صورت نیاز workflow) و اعتبارسنجی با GET /user؛
-     توکن فقط در حافظهٔ همین اجرا نگه داشته می‌شود و هرگز ذخیره/لاگ نمی‌شود.
+  ۱) ورود گیت‌هاب فقط با «ورود با مرورگر» (Device Flow — بدون ساخت هیچ کلیدی)؛
+     توکن نشست فقط در حافظهٔ همین اجرا نگه داشته می‌شود و هرگز ذخیره/لاگ نمی‌شود.
   ۲) مرورگر ماندگار Playwright با user_data_dir ثابت (از .env) باز می‌شود.
   ۳) موتور ایجنت روی اکانت chat.deepseek.com تسک‌ها را اجرا می‌کند.
 
@@ -29,8 +28,8 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 import time
-from getpass import getpass
 from typing import Any, Dict, List, Optional
 
 import config
@@ -66,42 +65,30 @@ from webhooks import WebhookWatcher
 BANNER = r"""
 ╔══════════════════════════════════════════════════════════════════╗
 ║   DevX Agent (CLI) v4 — حافظه + مهارت + زیرایجنت + اتوماسیون       ║
-║   chat.deepseek.com (Playwright) + GitHub (PyGithub 2.x)          ║
+║   chat.deepseek.com (Playwright) + GitHub (REST خالص، Device Flow)  ║
 ║   رابط وب حرفه‌ای:  python devx.py  →  http://127.0.0.1:8770       ║
 ╚══════════════════════════════════════════════════════════════════╝
 """
 
 
 # ======================================================================
-# دریافت و اعتبارسنجی توکن گیت‌هاب در راه‌اندازی
+# ورود گیت‌هاب در راه‌اندازی — فقط «ورود با مرورگر» (Device Flow)
 # ======================================================================
 
-def obtain_github_tools(max_attempts: Optional[int] = None) -> GitHubTools:
-    """ورود گیت‌هاب در CLI — پیش‌فرض: ورود با مرورگر (Device Flow، بدون هیچ کلید).
+def obtain_github_tools() -> GitHubTools:
+    """ورود گیت‌هاب در CLI — تنها روش: ورود با مرورگر (Device Flow، بدون هیچ کلید).
 
     کد کوتاه نمایش داده می‌شود؛ کاربر در مرورگری که از قبل به گیت‌هاب لاگین است
     (نشست/کوکی مرورگر) صفحهٔ github.com/login/device را باز می‌کند و کد را
     تأیید می‌کند — همان تجربهٔ مغز دیپ‌سیک: بدون ساخت و کپی کردن توکن.
-    اگر Device Flow ممکن نشد، مسیر قدیمی توکن کلاسیک با getpass ارائه می‌شود.
-    """
-    # ۱) توکن از متغیر محیطی (برای اجراهای اسکریپتی/CI — اختیاری)
-    env_token = os.getenv("GITHUB_TOKEN", "").strip()
-    if env_token:
-        gh_tools = GitHubTools(env_token)
-        try:
-            info = gh_tools.validate_token()
-            print(f"✅ توکن از GITHUB_TOKEN معتبر است — کاربر: {info['login']}\n")
-            return gh_tools
-        except (TokenInvalidError, GhApiError) as e:
-            print(f"⚠️ GITHUB_TOKEN معتبر نیست ({e}) — به ورود با مرورگر می‌رویم.\n")
-
-    # ۲) ورود با مرورگر — بدون ساخت هیچ کلیدی
+    اگر Device Flow ممکن نشد، با پیام روشن خارج می‌شویم (مسیر توکن دستی حذف شده)."""
     try:
         flow = DeviceFlow()
         info = flow.start()
     except DeviceFlowError as e:
-        print(f"⚠️ ورود با مرورگر ممکن نشد: {e} — به توکن کلاسیک می‌رویم.\n")
-        return _classic_token_flow(max_attempts)
+        print(f"⛔ ورود با مرورگر ممکن نشد: {e}")
+        print("   اتصال شبکه را چک کن و دوباره اجرا کن — ورود دستی با توکن حذف شده است.")
+        sys.exit(3)
 
     print("🌐 ورود با مرورگر — بدون هیچ کلیدی:")
     print(f"   ۱) این آدرس را در مرورگر باز کن:  {info['verification_uri']}")
@@ -120,8 +107,8 @@ def obtain_github_tools(max_attempts: Optional[int] = None) -> GitHubTools:
     try:
         token = flow.wait(sleep_fn=_sleep_tick, max_s=info["expires_in"])
     except DeviceFlowError as e:
-        print(f"\n⚠️ {e} — به توکن کلاسیک می‌رویم.\n")
-        return _classic_token_flow(max_attempts)
+        print(f"\n⛔ {e} — دوباره اجرا کن تا کد تازه بگیری.")
+        sys.exit(3)
     print("\n✅ در مرورگر تأیید شد!\n")
     gh_tools = GitHubTools(token)
     try:
@@ -131,42 +118,6 @@ def obtain_github_tools(max_attempts: Optional[int] = None) -> GitHubTools:
         sys.exit(3)
     print(f"✅ اتصال گیت‌هاب برقرار است — کاربر: {gh_info['login']}  (اسکوپ‌ها: {gh_info['token_scopes'] or 'نامشخص'})\n")
     return gh_tools
-
-
-def _classic_token_flow(max_attempts: Optional[int] = None) -> GitHubTools:
-    """مسیر جایگزین: توکن کلاسیک دست‌ساز با getpass (وقتی ورود با مرورگر ممکن نیست)."""
-    attempts = max_attempts or config.TOKEN_MAX_ATTEMPTS
-    print("🔑 برای عملیات گیت‌هاب به یک GitHub Token نیاز است.")
-    print("   توکن را از https://github.com/settings/tokens بسازید (Generate new token (classic)).")
-    print("   اسکوپ‌های حداقلی: repo  — و در صورت نیاز به Actions: workflow")
-    print("   ⚠️  توکن کلاسیک به‌طور پیش‌فرض به منابع سازمان‌ها هم دسترسی دارد؛ با احتیاط بسازید و پس از کار حذف کنید.")
-    print("   🔒 توکن فقط در حافظهٔ همین اجرا نگه داشته می‌شود و در فایل/لاگ/کد ذخیره نمی‌شود.\n")
-
-    for attempt in range(1, attempts + 1):
-        try:
-            token = getpass(f"GitHub Token [تلاش {attempt}/{attempts}]: ").strip()
-        except (KeyboardInterrupt, EOFError):
-            print("\nخروج.")
-            sys.exit(130)
-        if not token:
-            print("❌ هیچ توکنی وارد نشد — دوباره تلاش کنید.\n")
-            continue
-
-        gh_tools = GitHubTools(token)  # توکن فقط در همین آبجکتِ درون‌حافظه‌ای زندگی می‌کند
-        try:
-            info = gh_tools.validate_token()
-        except TokenInvalidError as e:
-            print(f"❌ توکن نامعتبر است (401 از GitHub) — لطفاً دوباره وارد کنید. ({e})\n")
-            continue
-        except GhApiError as e:
-            print(f"❌ خطای API گیت‌هاب ({e.status}) — لطفاً دوباره تلاش کنید.\n")
-            continue
-
-        print(f"✅ توکن معتبر است — کاربر: {info['login']}  (اسکوپ‌ها: {info['token_scopes'] or 'نامشخص'})\n")
-        return gh_tools
-
-    print("⛔ تعداد تلاش‌های مجاز برای وارد کردن توکن به پایان رسید.")
-    sys.exit(2)
 
 
 # ======================================================================
@@ -244,7 +195,7 @@ def cli_pick_project(projects: ProjectManager) -> Dict[str, Any]:
 def cli_apply_project(engine: AgentEngine, projects: ProjectManager,
                       gh_tools: Optional[GitHubTools], rec: Dict[str, Any]) -> None:
     """سوییچ کامل موتور به پروژهٔ انتخاب‌شده: حافظه + مهارت + رجیستری + شناسنامه."""
-    engine.memory = MemoryStore(memory_dir=projects.memory_dir(rec["key"]))
+    engine.memory = MemoryStore.open(memory_dir=projects.memory_dir(rec["key"]))
     engine.skills = SkillLibrary(skills_dir=projects.skills_dir(rec["key"]))
     engine.set_registry(build_registry(gh_tools, engine.memory, engine.skills, projects))
     engine.set_project({"id": rec["id"], "name": rec["name"], "key": rec["key"]})
@@ -278,7 +229,7 @@ def run_cli() -> None:
     # ── پروژه‌ها: انتخاب/ساخت هنگام شروع (نام پرسیده می‌شود، آیدی خودکار ثبت می‌شود) ──
     projects = ProjectManager()
     rec = cli_pick_project(projects)
-    memory = MemoryStore(memory_dir=projects.memory_dir(rec["key"]))
+    memory = MemoryStore.open(memory_dir=projects.memory_dir(rec["key"]))
     skills = SkillLibrary(skills_dir=projects.skills_dir(rec["key"]))
     sessions = SessionManager(rec["key"], projects.memory_dir(rec["key"]))
     print(f"🎯 پروژهٔ فعال: [{rec['id']}] {rec['name']} — حافظهٔ ایزولهٔ خودش بارگذاری شد (سشن: {sessions.active()['title']})")
@@ -390,7 +341,7 @@ def run_cli() -> None:
         """سوییچ کامل CLI به پروژهٔ دیگر (حافظه/مهارت/رجیستری/سشن)."""
         nonlocal memory, skills, sessions, rec
         rec = rec2
-        memory = MemoryStore(memory_dir=projects.memory_dir(rec2["key"]))
+        memory = MemoryStore.open(memory_dir=projects.memory_dir(rec2["key"]))
         skills = SkillLibrary(skills_dir=projects.skills_dir(rec2["key"]))
         sessions = SessionManager(rec2["key"], projects.memory_dir(rec2["key"]))
         engine.memory = memory
@@ -401,10 +352,50 @@ def run_cli() -> None:
             approvals=approvals, audit=audit, active_project_id=rec2["id"],
         ))
         engine.register_delegate_tool()
+        _wire_cli_approvals()
         engine.set_project({"id": rec2["id"], "name": rec2["name"], "key": rec2["key"], "persona": rec2.get("persona", "")})
         engine.session_id = sessions.active_id()
 
     engine.session_id = sessions.active_id()
+
+    def _wire_cli_approvals() -> None:
+        """درخواست‌های تایید انسانی در ترمینال چاپ می‌شوند تا کاربر بداند /approve بزند.
+
+        بدون این، نخِ موتور در approvals.wait منتظر می‌ماند و کاربر هیچ
+        اطلاعی از درخواست نمی‌گرفت (۱۸۰ ثانیه سکوت → تایم‌اوت)."""
+        if getattr(engine.registry, "on_approval_requested", None) is not None:
+            return
+
+        def _on_approval(req: Dict[str, Any]) -> None:
+            print(
+                f"\n⏳ درخواست تایید [{req['id']}] {req['tool']} ← "
+                f"{json.dumps(req.get('arguments') or {}, ensure_ascii=False)[:100]}\n"
+                "   در همین ترمینال «/approve» را بزن — تسک در پس‌زمینه منتظر است.\n"
+            )
+
+        engine.registry.on_approval_requested = _on_approval
+
+    _wire_cli_approvals()
+
+    # تسک‌ها در نخِ جدا اجرا می‌شوند تا REPL (و /approve) در حین کار زنده بماند؛
+    # قبلاً run_task روی نخِ اصلی بود → ابزار خطرناک = فریز کامل ترمینال تا ۱۸۰ ثانیه
+    _task_state: Dict[str, Any] = {"thread": None}
+
+    def _run_async(engine_: AgentEngine, task_text: str, projects_: Optional[ProjectManager]) -> None:
+        old = _task_state.get("thread")
+        if old is not None and old.is_alive():
+            print("⏳ تسک قبلی هنوز در حال اجراست — صبر کن تمام شود.\n")
+            return
+
+        def _worker() -> None:
+            try:
+                _run(engine_, task_text, projects_)
+            finally:
+                print("(تسک تمام شد — دستور بعدی را بنویس)\n")
+
+        th = threading.Thread(target=_worker, daemon=True, name="cli-task")
+        _task_state["thread"] = th
+        th.start()
 
     counts = memory.counts()
     print(f"🧠 حافظه: {counts['facts']} حقیقت، {counts['lessons']} درس، {counts['tasks']} تسک | 🧰 مهارت‌ها: {len(skills.list_skills())}")
@@ -429,6 +420,10 @@ def run_cli() -> None:
             if not task:
                 continue
             if task in ("/exit", "/quit", "exit", "quit"):
+                th = _task_state.get("thread")
+                if th is not None and th.is_alive():
+                    print("⏳ تسک در حال اجراست — تا ۱۵ ثانیه مهلت می‌دهیم…")
+                    th.join(timeout=15)
                 print("خداحافظ!")
                 break
             if task == "/tools":
@@ -598,12 +593,24 @@ def run_cli() -> None:
                 print("📊", memory.stats())
                 continue
             if task == "/newchat":
-                brain_client.new_chat()
+                # brain-agnostic: در حالت API هم کار می‌کند (قبلاً brain_client
+                # فقط در حالت مرورگر تعریف می‌شد → NameError در حالت API)
+                brain.new_chat()
                 print("✅ گفت‌وگوی تازه آغاز شد.\n")
                 continue
-            _run(engine, task, projects)
+            _run_async(engine, task, projects)
     finally:
-        brain_client.close()
+        # مغز مرورگر مرورگرش را می‌بندد؛ مغز API هیچ منبعی ندارد (close مشترک)
+        try:
+            brain.close()
+        except Exception:
+            pass
+        # مغزهای تستی close ندارند — کلاینتِ مرورگر را مستقیم هم ببند
+        if "brain_client" in dir():
+            try:
+                brain_client.close()
+            except Exception:
+                pass
 
 
 def _run(engine: AgentEngine, task: str, projects: Optional[ProjectManager] = None) -> None:

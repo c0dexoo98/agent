@@ -79,15 +79,15 @@ class GitHubTools:
     def validate_token(self) -> Dict[str, Any]:
         """اعتبارسنجی با GET https://api.github.com/user.
 
-        اگر نام کاربری برگردد، نشست معتبر است؛ اگر 401/403 بدهد
-        TokenInvalidError پرتاب می‌شود تا پیام واضح بدهیم و دوباره ورود بخواهیم.
-        """
+        فقط 401 یعنی توکن باطل شده (TokenInvalidError). 403 به‌طور معمول
+        «سهمیهٔ API تمام شده» است — نشست هنوز سالم است و نباید سشن ذخیره‌شده
+        پاک شود؛ همان خطای API با پیام دوستانه عبور می‌کند."""
         try:
             data = self.client.get_user()
         except GhApiError as e:
-            if e.status in (401, 403):
+            if e.status == 401:
                 raise TokenInvalidError(
-                    f"توکن/نشست نامعتبر است یا اسکوپ کافی ندارد (HTTP {e.status})"
+                    "توکن/نشست نامعتبر است (HTTP 401) — دوباره «ورود با مرورگر» را بزن."
                 ) from e
             raise
         self._user = data
@@ -196,7 +196,16 @@ class GitHubTools:
         """وضعیت لحظه‌ای مخزن: شاخه‌ها، آخرین کامیت‌ها، تعداد Issues/PR باز و آخرین اجرای Actions."""
         full = self._repo_name(repo)
         r = self.client.get_repo(full)
-        branches = self.client.list_branches(full, per_page=20)
+        # شمارش واقعی شاخه‌ها با صفحه‌بندی (per_page=20 بدون صفحه‌بندی برای
+        # مخزن با >۲۰ شاخه همیشه ۲۰ می‌داد)
+        branches = []
+        page = 1
+        while page <= 10:  # سقف ۱۰۰۰ شاخه
+            chunk = self.client.list_branches(full, per_page=100, page=page)
+            branches.extend(chunk)
+            if len(chunk) < 100:
+                break
+            page += 1
         commits = []
         for c in (self.client.list_commits(full, per_page=5) or [])[:5]:
             ca = (c.get("commit") or {}).get("author") or {}
@@ -304,23 +313,35 @@ class GitHubTools:
     ) -> Dict[str, Any]:
         """فهرست Issues مخزن (Pull Requestها فیلتر می‌شوند). state: open/closed/all."""
         full = self._repo_name(repo)
-        issues = self.client.list_issues(full, state=state, per_page=max(1, min(int(limit), 100)))
-        items = []
-        for i in issues[: max(1, min(int(limit), 100))]:
-            if i.get("pull_request"):
-                continue  # PRها در ابزار جداگانهٔ list_pull_requests هستند
-            items.append(
-                {
-                    "number": i.get("number"),
-                    "title": i.get("title"),
-                    "state": i.get("state"),
-                    "user": (i.get("user") or {}).get("login"),
-                    "labels": [lb.get("name") for lb in (i.get("labels") or [])],
-                    "comments": i.get("comments"),
-                    "html_url": i.get("html_url"),
-                    "created_at": i.get("created_at"),
-                }
-            )
+        # صفحه‌بندی تا پرشدن limit: endpoint «issues» مخلوط Issue/PR برمی‌گرداند و
+        # PRها سمت کلاینت فیلتر می‌شوند — با یک صفحهٔ واحد، مخزن PR-محور
+        # «هیچ issue‌ای نیست» جواب می‌داد
+        want = max(1, min(int(limit), 100))
+        per_page = 100 if want > 30 else 30
+        items: list = []
+        page = 1
+        while page <= 5 and len(items) < want:
+            issues = self.client.list_issues(full, state=state, per_page=per_page, page=page)
+            for i in issues:
+                if i.get("pull_request"):
+                    continue  # PRها در ابزار جداگانهٔ list_pull_requests هستند
+                items.append(
+                    {
+                        "number": i.get("number"),
+                        "title": i.get("title"),
+                        "state": i.get("state"),
+                        "user": (i.get("user") or {}).get("login"),
+                        "labels": [lb.get("name") for lb in (i.get("labels") or [])],
+                        "comments": i.get("comments"),
+                        "html_url": i.get("html_url"),
+                        "created_at": i.get("created_at"),
+                    }
+                )
+                if len(items) >= want:
+                    break
+            if len(issues) < per_page:
+                break
+            page += 1
         return {"count": len(items), "issues": items}
 
     def get_issue(self, repo: str, number: int) -> Dict[str, Any]:
