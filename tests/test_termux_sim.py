@@ -47,6 +47,59 @@ except DeepSeekError as e:
     assert "playwright نصب نیست" in str(e) and "pkg install chromium nodejs-lts" in str(e), str(e)
 print("ok: بدون playwright — روی ترموکس پیام صادقانه + راهنمای نصب واقعی می‌دهد")
 
+# ─── محیط درایور پلی‌رایت روی ترموکس (فیکس «Unsupported platform: android») ──
+# نود ۲۳+ روی اندروید process.platform را «android» می‌دهد و درایور پلی‌رایت
+# در computeDefaultCacheDirectory فقط linux/darwin/win32 می‌شناسد → موقع بالا
+# آمدن می‌میرد («connection closed while reading from the driver»).
+_PW_ENV_KEYS = ("PLAYWRIGHT_NODEJS_PATH", "PLAYWRIGHT_BROWSERS_PATH", "DISPLAY", "WAYLAND_DISPLAY")
+_saved_env = {k: os.environ.get(k) for k in _PW_ENV_KEYS}
+for k in ("PLAYWRIGHT_NODEJS_PATH", "PLAYWRIGHT_BROWSERS_PATH", "DISPLAY", "WAYLAND_DISPLAY"):
+    os.environ.pop(k, None)
+try:
+    dc._ensure_pw_env()
+    node_p = os.environ.get("PLAYWRIGHT_NODEJS_PATH", "")
+    bw_p = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "")
+    assert Path(node_p).name in ("node", "nodejs"), f"نود سیستم معرفی نشد: {node_p!r}"
+    assert "ms-playwright" in bw_p, f"مسیر cache ست نشد: {bw_p!r}"
+    # مقدار دستی کاربر دست نمی‌خورد
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "/custom/px"
+    dc._ensure_pw_env()
+    assert os.environ["PLAYWRIGHT_BROWSERS_PATH"] == "/custom/px"
+    print("ok: _ensure_pw_env روی ترموکس → نود سیستم + PLAYWRIGHT_BROWSERS_PATH (فیکس android)؛ مقدار دستی دست‌نخورده")
+finally:
+    os.environ.update({k: v for k, v in _saved_env.items() if v is not None})
+    for k, v in _saved_env.items():
+        if v is None:
+            os.environ.pop(k, None)
+
+# ─── نمایشگر: پنجرهٔ مرئی روی ترموکس بدون X11 → راهنمای termux-x11 ─────────
+_saved_disp = {k: os.environ.get(k) for k in ("DISPLAY", "WAYLAND_DISPLAY", "TERMUX")}
+for k in ("DISPLAY", "WAYLAND_DISPLAY"):
+    os.environ.pop(k, None)
+try:
+    msg = dc._visible_launch_error(headless=False)
+    assert msg and "termux-x11" in msg and "DISPLAY" in msg, msg
+    assert dc._visible_launch_error(headless=True) is None, "headless نباید خطای نمایشگر بدهد"
+    assert dc.auto_headless_background() is True, "لینوکس بدون نمایشگر → پس‌زمینه headless"
+    os.environ["DISPLAY"] = ":0"
+    assert dc._visible_launch_error(headless=False) is None, "با نمایشگر مانعی نیست"
+    assert dc.auto_headless_background() is False
+    print("ok: گارد نمایشگر — پیام راهنمای termux-x11 به‌جای کرش مبهم؛ پس‌زمینه خودکار headless")
+finally:
+    os.environ.update({k: v for k, v in _saved_disp.items() if v is not None})
+    for k, v in _saved_disp.items():
+        if v is None:
+            os.environ.pop(k, None)
+os.environ["TERMUX"] = "1"   # شبیه‌سازی ترموکس برای ادامهٔ تست
+
+# ─── خطاهای مرگ درایور → پیام فارسی قابل‌اقدام ─────────────────────────────
+h1 = dc._pw_driver_help(RuntimeError("Connection closed while reading from the driver."))
+assert h1 and "PLAYWRIGHT_BROWSERS_PATH" in h1 and "Unsupported platform" in h1, h1
+h2 = dc._pw_driver_help(RuntimeError("This installation of Playwright does not include Node.js."))
+assert h2 and "nodejs-lts" in h2, h2
+assert dc._pw_driver_help(RuntimeError("some random launch error")) is None
+print("ok: خطای «connection closed» → راهنمای فارسی دقیق (نود + BROWSERS_PATH)")
+
 # ─── بدون PyGithub هم ابزارهای گیت‌هاب کار می‌کنند (کلاینت REST خالص) ───────
 import threading  # noqa: E402
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer  # noqa: E402

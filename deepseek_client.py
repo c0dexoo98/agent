@@ -11,6 +11,13 @@
 
 نکتهٔ مهم اولین اجرا: مرورگر با پنجرهٔ مرئی باز می‌شود (headless=false) و کاربر
 یک‌بار باید دستی وارد اکانت شود؛ از آن بعد، پروفایل ماندگار لاگین را حفظ می‌کند.
+
+ترموکس/اندروید: پلی‌رایتِ pip روی bionic اجرا نمی‌شود؛ نودِ سیستم معرفی می‌شود
+(PLAYWRIGHT_NODEJS_PATH) و چون نودِ اندروید پلتفرم را «android» گزارش می‌دهد،
+PLAYWRIGHT_BROWSERS_PATH هم ست می‌شود تا درایور موقع بالا آمدن نمرده
+(«Unsupported platform: android»). کرومیومِ پکیج رسمیِ ترموکس هم خودکار پیدا
+می‌شود. پنجرهٔ مرئی روی ترموکس به termux-x11 نیاز دارد؛ بدون آن، اتصال
+پس‌زمینه خودکار headless می‌شود.
 """
 from __future__ import annotations
 
@@ -45,21 +52,89 @@ def _is_termux() -> bool:
     return "com.termux" in os.environ.get("PREFIX", "")
 
 
-def _ensure_pw_nodejs() -> None:
-    """معرفی Node.js سیستم به playwright — فیکس خطای رایج ترموکس.
+def _ensure_pw_env() -> None:
+    """آماده‌سازی محیط درایور پلی‌رایت — فقط روی ترموکس دست می‌زنیم:
 
-    بستهٔ pip پلی‌رایت یک Node.js همراه دارد که برای لینوکس استاندارد (glibc)
-    بیلد شده؛ روی ترموکس (اندروید/bionic) اجرا نمی‌شود و پلی‌رایت خطای
-    «This installation of Playwright does not include Node.js» می‌دهد.
-    راه‌حل رسمی: PLAYWRIGHT_NODEJS_PATH را به نودِ سیستم اشاره بدهیم
-    (pkg install nodejs-lts). اگر کاربر خودش ست کرده باشد، دست نمی‌زنیم."""
+    ۱) PLAYWRIGHT_NODEJS_PATH → نودِ سیستم؛ نودِ داخل بستهٔ pip برای glibc
+       بیلد شده و روی ترموکس (bionic) اجرا نمی‌شود → خطای
+       «This installation of Playwright does not include Node.js».
+    ۲) PLAYWRIGHT_BROWSERS_PATH → دایرکتوری قابل‌نوشتن؛ نود ۲۳+ روی اندروید
+       process.platform را 'android' گزارش می‌دهد و درایور پلی‌رایت در
+       computeDefaultCacheDirectory فقط linux/darwin/win32 می‌شناسد → کرش
+       «Unsupported platform: android» هنگام بالا آمدن درایور که سمت پایتون
+       به‌صورت «connection closed while reading from the driver» دیده می‌شود.
+       ست‌کردن این متغیر همان چکِ پلتفرم را کامل دور می‌زند.
+    روی لینوکس/مک/ویندوز هیچ‌چیز override نمی‌شود (نود و کرومیومِ خود بسته سالم‌اند)؛
+    مقدارهایی که کاربر خودش ست کرده باشد هم دست‌نخورده می‌مانند.
+    """
     import os
     import shutil
-    if os.environ.get("PLAYWRIGHT_NODEJS_PATH"):
+    if not _is_termux():
         return
-    node = shutil.which("node") or shutil.which("nodejs")
-    if node:
-        os.environ["PLAYWRIGHT_NODEJS_PATH"] = node
+    if not os.environ.get("PLAYWRIGHT_NODEJS_PATH"):
+        node = shutil.which("node") or shutil.which("nodejs")
+        if node:
+            os.environ["PLAYWRIGHT_NODEJS_PATH"] = node
+    if not os.environ.get("PLAYWRIGHT_BROWSERS_PATH"):
+        cache_dir = Path.home() / ".cache" / "ms-playwright"
+        try:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(cache_dir)
+
+
+def _has_display() -> bool:
+    """نمایشگر گرافیکی داریم؟ (X11 یا Wayland — termux-x11 هم DISPLAY را ست می‌کند)"""
+    import os
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
+def auto_headless_background() -> bool:
+    """اتصال پس‌زمینهٔ مغز روی لینوکسِ بدون نمایشگر (سرور/ترموکس بدون X11) باید
+    headless شود — پنجره‌ای برای بازشدن وجود ندارد. مک/ویندوز دست‌نخورده می‌مانند."""
+    import sys
+    return sys.platform.startswith("linux") and not _has_display()
+
+
+def _visible_launch_error(headless: bool) -> Optional[str]:
+    """پیام خطای راهنما برای «پنجرهٔ مرئی روی دستگاه بدون نمایشگر»؛ وگرنه None.
+
+    به‌جای کرش مبهم کرومیوم («Missing X server») کاربر می‌فهمد دقیقاً چه کند."""
+    import sys
+    if headless or sys.platform != "linux" or _has_display():
+        return None
+    if _is_termux():
+        return (
+            "پنجرهٔ مرئی مرورگر روی ترموکس فقط با نمایشگر X11 ممکن است: "
+            "pkg install termux-x11 را نصب و termux-x11 را اجرا کن، بعد در ترموکس "
+            "export DISPLAY=:1 بزن و دوباره «ورود دستی» را بزن. "
+            "(راه بدون مرورگر: «کلید API» در تنظیمات.)"
+        )
+    return (
+        "پنجرهٔ مرئی مرورگر روی این سرور ممکن نیست (DISPLAY تنظیم نیست) — "
+        "با X forwarding یا روی دسکتاپ اجرا کن؛ برای کار بدون نمایشگر، کلید API بده."
+    )
+
+
+def _pw_driver_help(e: BaseException) -> Optional[str]:
+    """تشخیص خطاهای مرگِ درایور پلی‌رایت → پیام راهنمای فارسی قابل‌اقدام."""
+    text = str(e)
+    if "PLAYWRIGHT_NODEJS_PATH" in text or "does not include Node.js" in text:
+        return (
+            "پلی‌رایت به Node.js نیاز دارد — روی ترموکس: pkg install nodejs-lts "
+            "(مسیرش خودکار پیدا می‌شود؛ دستی: export PLAYWRIGHT_NODEJS_PATH=$PREFIX/bin/node)."
+        )
+    if "Unsupported platform" in text or "Connection closed" in text:
+        return (
+            "درایور پلی‌رایت موقع بالا آمدن بست — روی ترموکس دو متغیر لازم است: "
+            "PLAYWRIGHT_NODEJS_PATH (نود سیستم) و PLAYWRIGHT_BROWSERS_PATH (فیکسِ "
+            "«Unsupported platform: android» زیرا نودِ اندروید پلتفرم را android "
+            "گزارش می‌دهد). برنامهٔ جدید خودکار هر دو را ست می‌کند؛ دستی: "
+            "export PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright و "
+            "pkg install nodejs-lts chromium"
+        )
+    return None
 
 
 def _termux_chromium_path() -> Optional[str]:
@@ -165,16 +240,19 @@ class DeepSeekClient:
                 "برای نصب: pip install playwright && playwright install chromium"
             )
         self.user_data_dir.mkdir(parents=True, exist_ok=True)
-        _ensure_pw_nodejs()  # ترموکس: نودِ همراه پلی‌رایت اجرا نمی‌شود → نودِ سیستم
+        # پنجرهٔ مرئی روی دستگاه بدون نمایشگر (سرور/ترموکس بدون X11) → پیام راهنما
+        # به‌جای کرش مبهم کرومیوم؛ اینجا هنوز هیچ پروسه‌ای اسپاون نشده است
+        vis_err = _visible_launch_error(self.headless)
+        if vis_err:
+            raise DeepSeekError(vis_err)
+        # ترموکس: نود سیستم + دایرکتوری cache — فیکس «Unsupported platform: android»
+        _ensure_pw_env()
         try:
             self._pw = sync_playwright().start()
-        except Exception as e:
-            if "PLAYWRIGHT_NODEJS_PATH" in str(e) or "does not include Node.js" in str(e):
-                raise DeepSeekError(
-                    "پلی‌رایت به Node.js نیاز دارد — روی ترموکس: pkg install nodejs-lts "
-                    "و سپس: export PLAYWRIGHT_NODEJS_PATH=$PREFIX/bin/node "
-                    "(یا همان خط را در ~/.bashrc بگذار)."
-                ) from e
+        except Exception as e:  # noqa: BLE001 — خطاهای درایور را به راهنمای فارسی تبدیل می‌کنیم
+            help_msg = _pw_driver_help(e)
+            if help_msg:
+                raise DeepSeekError(help_msg) from e
             raise
         launch_kwargs = dict(
             user_data_dir=str(self.user_data_dir),
@@ -187,11 +265,19 @@ class DeepSeekClient:
                 "--disable-features=IsolateOrigins",
             ],
         )
-        # ترموکس: کرومیومِ پکیج رسمی به‌جای دانلودِ خود پلی‌رایت (که روی اندروید نیست)
+        # ترموکس: کرومیومِ پکیج رسمی به‌جای دانلودِ خود پلی‌رایت (که روی اندروید نیست)؛
+        # سندباکس setuid ندارد و GPU اندروید در headless ناپایدار است → دو پرچم اضافی
         termux_exe = _termux_chromium_path()
         if termux_exe:
             launch_kwargs["executable_path"] = termux_exe
-        self._ctx = self._pw.chromium.launch_persistent_context(**launch_kwargs)
+            launch_kwargs["args"] = launch_kwargs["args"] + ["--no-sandbox", "--disable-gpu"]
+        try:
+            self._ctx = self._pw.chromium.launch_persistent_context(**launch_kwargs)
+        except Exception as e:  # noqa: BLE001 — مرگ درایور هنگام launch هم همان راهنما را بگیرد
+            help_msg = _pw_driver_help(e)
+            if help_msg:
+                raise DeepSeekError(help_msg) from e
+            raise
         self._page = self._ctx.pages[-1] if self._ctx.pages else self._ctx.new_page()
         self._goto(self.url)
 
@@ -255,8 +341,9 @@ class DeepSeekClient:
             return True
         if self.headless:
             raise LoginRequired(
-                "اکانت DeepSeek لاگین نیست و در حالت headless نمی‌توان دستی وارد شد؛ "
-                "یک‌بار با DEEPSEEK_HEADLESS=false اجرا کن و در پنجرهٔ مرورگر وارد شو."
+                "اکانت DeepSeek لاگین نیست و در حالت headless نمی‌توان دستی وارد شد — "
+                "دکمهٔ «ورود دستی» را بزن تا پنجرهٔ مرئی باز شود "
+                "(روی ترموکس: اول termux-x11 را نصب و اجرا کن و DISPLAY را تنظیم کن)."
             )
         print(
             "\n⚠️  اکانت DeepSeek لاگین نیست.\n"

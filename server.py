@@ -33,7 +33,7 @@ from audit import AuditLog
 from builtin_tools import register_builtin_tools
 from checkpoint import CheckpointStore
 from api_client import APIBrain, APIError
-from deepseek_client import DeepSeekClient
+from deepseek_client import DeepSeekClient, auto_headless_background
 from fs_tools import register_fs_tools
 from gh_api import GhApiError
 from github_tools import (
@@ -517,7 +517,10 @@ class DevXState:
                 self.client = DeepSeekClient(
                     user_data_dir=config.DEEPSEEK_USER_DATA_DIR,
                     url=config.DEEPSEEK_URL,
-                    headless=not visible_login and config.DEEPSEEK_HEADLESS,
+                    # اتصال پس‌زمینه روی لینوکسِ بدون نمایشگر (سرور/ترموکس بدون X11)
+                    # خودکار headless می‌شود — پنجره‌ای برای بازشدن وجود ندارد
+                    headless=(not visible_login)
+                    and (config.DEEPSEEK_HEADLESS or auto_headless_background()),
                     response_timeout=config.RESPONSE_TIMEOUT,
                     poll_interval=config.RESPONSE_POLL_INTERVAL,
                     stable_checks=config.RESPONSE_STABLE_CHECKS,
