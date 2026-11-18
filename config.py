@@ -2,8 +2,10 @@
 """پیکربندی مرکزی ایجنت — همهٔ مقادیر قابل‌تنظیم از فایل .env خوانده می‌شوند.
 
 فایل .env باید کنار همین فایل قرار بگیرد (نمونهٔ کامل در .env.example).
-نکتهٔ امنیتی مهم: توکن GitHub هرگز در .env یا هیچ فایل دیگری ذخیره نمی‌شود؛
-توکن فقط هنگام راه‌اندازی با getpass() از کاربر گرفته و صرفاً در حافظهٔ همان اجرا نگه داشته می‌شود.
+نکتهٔ امنیتی: توکن GitHub از نسخهٔ ۴.۲ به‌صورت رمزنگاری‌نشده در فایل محلی
+.gh_session.json (دسترسی ۶۰۰، فقط همین دستگاه) ماندگار می‌شود تا بعد از
+ری‌استارت نیاز به ورود دوباره نباشد؛ با «خروج» از UI کامل حذف می‌شود.
+با GH_SESSION_PERSIST=false می‌توان به رفتار قدیمی (فقط حافظه) برگشت.
 """
 from __future__ import annotations
 
@@ -73,6 +75,13 @@ AI_TIMEOUT: int = int(os.getenv("AI_TIMEOUT", "240"))
 # پایه‌های گیت‌هاب (پیش‌فرض واقعی؛ فقط تست‌ها بازنویسی می‌کنند)
 GH_API_BASE: str = os.getenv("GH_API_BASE", "https://api.github.com").rstrip("/")
 GH_OAUTH_BASE: str = os.getenv("GH_OAUTH_BASE", "https://github.com").rstrip("/")
+
+# ماندگاری نشست گیت‌هاب: توکن در فایل محلی با دسترسی ۶۰۰ ذخیره می‌شود تا
+# بعد از بستن ترمینال/ری‌استارت، لاگین باقی بماند؛ «خروج» فایل را کامل پاک می‌کند.
+GH_SESSION_PERSIST: bool = _bool("GH_SESSION_PERSIST", "true")
+GH_SESSION_FILE: Path = Path(
+    os.getenv("GH_SESSION_FILE", str(BASE_DIR / ".gh_session.json"))
+).expanduser().resolve()
 
 # ---------------------------------------------------------------------------
 # حلقهٔ ایجنت (Agent Loop)

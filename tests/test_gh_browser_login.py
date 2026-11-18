@@ -375,6 +375,37 @@ assert p2["ok"] and p2["status"] in ("pending", "authorized"), p2
 srvmod.STATE._gh_flow = None
 print("✅ ۱۲) start/poll دارای interval (UI با ضرب‌آهنگ مجاز گیت‌هاب پول می‌زند)")
 
+# ─── ۱۳) سشن ماندگار: ذخیره → خروج → بازیابی خودکار بعد از ری‌استارت ────────
+import os as _os  # noqa: E402
+
+sess = srvmod.config.GH_SESSION_FILE
+assert sess.exists(), "بعد از ورود موفق، فایل سشن باید ذخیره شود"
+saved = json.loads(sess.read_text(encoding="utf-8"))
+assert saved.get("token") == TOKEN and saved.get("login") == "octocat", saved
+assert (_os.stat(sess).st_mode & 0o777) == 0o600, "فایل سشن باید دسترسی ۶۰۰ داشته باشد"
+print("✅ ۱۳-الف) سشن با دسترسی ۶۰۰ در فایل محلی ذخیره شد")
+
+# خروج: توکن از حافظه + فایل پاک؛ snapshotهم قطع را نشان بدهد
+out = srvmod.STATE.github_logout()
+assert out["ok"] and not sess.exists(), out
+assert srvmod.STATE.gh_tools is None and srvmod.STATE.token_info is None
+assert srvmod.STATE.snapshot()["token"]["set"] is False
+print("✅ ۱۳-ب) خروج: حافظه + فایل سشن کامل پاک شد")
+
+# بازیابی (مثل ری‌استارت سرور): فایل سشن معتبر → لاگین خودکار بدون ورود دوباره
+sess.write_text(json.dumps({"token": TOKEN, "login": "octocat"}), encoding="utf-8")
+srvmod.STATE.restore_github_session()
+assert srvmod.STATE.token_info and srvmod.STATE.token_info["login"] == "octocat"
+assert srvmod.STATE.gh_tools.get_rate_limit()["remaining"] == 4999, "ابزارهای بازیابی‌شده باید کار کنند"
+print("✅ ۱۳-ج) بازیابی خودکار از فایل سشن — بدون ورود دوباره")
+
+# توکن منقضی‌شده (۴۰۱): فایل سشن بی‌فایده است → پاک شود و بیرون بمانیم
+srvmod.STATE.github_logout()
+sess.write_text(json.dumps({"token": "gho_wrong"}), encoding="utf-8")
+srvmod.STATE.restore_github_session()
+assert srvmod.STATE.token_info is None and not sess.exists(), "توکن باطل باید فایل را پاک کند"
+print("✅ ۱۳-د) توکن منقضی (401) → فایل سشن پاک شد و لاگین باقی نماند")
+
 s.shutdown()
 s.server_close()
 srv.shutdown()

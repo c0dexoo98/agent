@@ -44,8 +44,8 @@ try:
     c.start()
     raise SystemExit("start() باید خطای واضح می‌داد")
 except DeepSeekError as e:
-    assert "playwright نصب نیست" in str(e) and "ترموکس/اندروید قابل اجرا نیست" in str(e), str(e)
-print("ok: بدون playwright — روی ترموکس پیام صادقانه می‌دهد (نه راهنمای نصب بی‌فایده)")
+    assert "playwright نصب نیست" in str(e) and "pkg install chromium nodejs-lts" in str(e), str(e)
+print("ok: بدون playwright — روی ترموکس پیام صادقانه + راهنمای نصب واقعی می‌دهد")
 
 # ─── بدون PyGithub هم ابزارهای گیت‌هاب کار می‌کنند (کلاینت REST خالص) ───────
 import threading  # noqa: E402

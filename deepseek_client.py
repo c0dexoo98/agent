@@ -45,6 +45,36 @@ def _is_termux() -> bool:
     return "com.termux" in os.environ.get("PREFIX", "")
 
 
+def _ensure_pw_nodejs() -> None:
+    """معرفی Node.js سیستم به playwright — فیکس خطای رایج ترموکس.
+
+    بستهٔ pip پلی‌رایت یک Node.js همراه دارد که برای لینوکس استاندارد (glibc)
+    بیلد شده؛ روی ترموکس (اندروید/bionic) اجرا نمی‌شود و پلی‌رایت خطای
+    «This installation of Playwright does not include Node.js» می‌دهد.
+    راه‌حل رسمی: PLAYWRIGHT_NODEJS_PATH را به نودِ سیستم اشاره بدهیم
+    (pkg install nodejs-lts). اگر کاربر خودش ست کرده باشد، دست نمی‌زنیم."""
+    import os
+    import shutil
+    if os.environ.get("PLAYWRIGHT_NODEJS_PATH"):
+        return
+    node = shutil.which("node") or shutil.which("nodejs")
+    if node:
+        os.environ["PLAYWRIGHT_NODEJS_PATH"] = node
+
+
+def _termux_chromium_path() -> Optional[str]:
+    """مسیر کرومیومِ سیستم روی ترموکس — پلی‌رایت روی اندروید کرومیوم خودش را
+    ندارد؛ `pkg install chromium` باینری $PREFIX/bin/chromium-browser می‌دهد."""
+    if not _is_termux():
+        return None
+    import shutil
+    for name in ("chromium-browser", "chromium", "chrome-browser"):
+        p = shutil.which(name)
+        if p:
+            return p
+    return None
+
+
 class DeepSeekError(Exception):
     """خطای عمومی کلاینت دیپ‌سیک."""
 
@@ -126,17 +156,27 @@ class DeepSeekClient:
         if not PLAYWRIGHT_AVAILABLE:
             if _is_termux():
                 raise DeepSeekError(
-                    "playwright نصب نیست — مرورگر دیپ‌سیک روی ترموکس/اندروید قابل اجرا نیست "
-                    "(کرومیوم برای playwright در اندروید وجود ندارد). بقیهٔ امکانات کار می‌کند؛ "
-                    "برای اجرای کامل تسک‌ها از کامپیوتر استفاده کن."
+                    "playwright نصب نیست — نصبش کن: pip install playwright "
+                    "و بعد روی ترموکس: pkg install chromium nodejs-lts "
+                    "(بقیهٔ امکانات بدون مرورگر هم کار می‌کند)."
                 )
             raise DeepSeekError(
                 "playwright نصب نیست — مرورگر دیپ‌سیک روی این دستگاه قابل اجرا نیست. "
                 "برای نصب: pip install playwright && playwright install chromium"
             )
         self.user_data_dir.mkdir(parents=True, exist_ok=True)
-        self._pw = sync_playwright().start()
-        self._ctx = self._pw.chromium.launch_persistent_context(
+        _ensure_pw_nodejs()  # ترموکس: نودِ همراه پلی‌رایت اجرا نمی‌شود → نودِ سیستم
+        try:
+            self._pw = sync_playwright().start()
+        except Exception as e:
+            if "PLAYWRIGHT_NODEJS_PATH" in str(e) or "does not include Node.js" in str(e):
+                raise DeepSeekError(
+                    "پلی‌رایت به Node.js نیاز دارد — روی ترموکس: pkg install nodejs-lts "
+                    "و سپس: export PLAYWRIGHT_NODEJS_PATH=$PREFIX/bin/node "
+                    "(یا همان خط را در ~/.bashrc بگذار)."
+                ) from e
+            raise
+        launch_kwargs = dict(
             user_data_dir=str(self.user_data_dir),
             headless=self.headless,
             viewport={"width": 1280, "height": 900},
@@ -147,6 +187,11 @@ class DeepSeekClient:
                 "--disable-features=IsolateOrigins",
             ],
         )
+        # ترموکس: کرومیومِ پکیج رسمی به‌جای دانلودِ خود پلی‌رایت (که روی اندروید نیست)
+        termux_exe = _termux_chromium_path()
+        if termux_exe:
+            launch_kwargs["executable_path"] = termux_exe
+        self._ctx = self._pw.chromium.launch_persistent_context(**launch_kwargs)
         self._page = self._ctx.pages[-1] if self._ctx.pages else self._ctx.new_page()
         self._goto(self.url)
 

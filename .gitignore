@@ -29,3 +29,6 @@ watches.json
 approvals.json
 notifications.json
 usage.json
+
+# سشن ماندگار گیت‌هاب (توکن واقعی!) — هرگز کامیت/زیپ نشود
+.gh_session.json

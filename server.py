@@ -323,13 +323,17 @@ class DevXState:
             return {"ok": False, "error": "توکن معتبر نیست — یا از ورود با مرورگر استفاده کن (بدون کلید) یا توکن درستی بده."}
         return self._install_github(token)
 
-    def _install_github(self, token: str) -> Dict[str, Any]:
-        """نصب مشترک کلاینت گیت‌هاب (توکن کلاسیک یا Device Flow) + بازسازی ابزارها."""
+    def _install_github(self, token: str, persist: bool = True) -> Dict[str, Any]:
+        """نصب مشترک کلاینت گیت‌هاب (توکن کلاسیک یا Device Flow) + بازسازی ابزارها.
+
+        persist=True (پیش‌فرض): توکن در فایل محلی با دسترسیٔ ۶۰۰ ذخیره می‌شود تا
+        بعد از بستن ترمینال/ری‌استارت هم لاگین بماند؛ «خروج» آن را کامل پاک می‌کند."""
         gh = GitHubTools(token, api_base=config.GH_API_BASE)
         try:
             info = gh.validate_token()
         except TokenInvalidError:
-            return {"ok": False, "error": "نشست نامعتبر است (401 از GitHub) — دوباره «ورود با مرورگر» را بزن یا توکن درستی بده."}
+            return {"ok": False, "invalid": True,
+                    "error": "نشست نامعتبر است (401 از GitHub) — دوباره «ورود با مرورگر» را بزن یا توکن درستی بده."}
         except GhApiError as e:
             return {"ok": False, "error": f"خطای API گیت‌هاب ({e.status}) — بعداً تلاش کن."}
         harden_github_tools(gh, self.rate_limiter, max_attempts=config.RETRY_MAX_ATTEMPTS)
@@ -337,8 +341,85 @@ class DevXState:
         self.token_info = info
         self._rebuild_registries()
         self.audit.append("github_token_set", {"login": info["login"]})
+        if persist:
+            self._save_gh_session(token, info)
         self.bus.emit("token_state", set=True, login=info["login"], scopes=info["token_scopes"])
         return {"ok": True, "login": info["login"], "scopes": info["token_scopes"]}
+
+    # ------------------------------------------------------------------
+    # سشن ماندگار گیت‌هاب — ذخیره / بازیابی خودکار / خروج
+    # ------------------------------------------------------------------
+
+    def _save_gh_session(self, token: str, info: Dict[str, Any]) -> None:
+        """ذخیرهٔ توکن در فایل محلی با دسترسیٔ ۶۰۰ — فقط روی همین دستگاه.
+
+        خطای نوشتن هرگز اتصالِ همین اجرا را خراب نمی‌کند (فقط ماندگاری از دست می‌رود)."""
+        if not config.GH_SESSION_PERSIST:
+            return
+        try:
+            data = json.dumps({
+                "token": token,
+                "login": info.get("login"),
+                "scopes": info.get("token_scopes"),
+                "saved_at": int(time.time()),
+            }, ensure_ascii=False)
+            config.GH_SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+            config.GH_SESSION_FILE.write_text(data, encoding="utf-8")
+            import os as _os
+            _os.chmod(config.GH_SESSION_FILE, 0o600)
+        except OSError:
+            pass
+
+    def _gh_session_token(self) -> Optional[str]:
+        """توکن ذخیره‌شده در فایل سشن (اگر معتبرِ شکلی باشد)."""
+        try:
+            data = json.loads(config.GH_SESSION_FILE.read_text(encoding="utf-8"))
+            tok = str(data.get("token") or "")
+            return tok if tok.startswith(("ghp_", "github_pat_", "gho_")) else None
+        except (OSError, ValueError):
+            return None
+
+    def restore_github_session(self) -> None:
+        """بازیابی خودکار لاگین گیت‌هاب از فایل سشن در شروع سرور.
+
+        توکن منقضی‌شده (401) → فایل پاک می‌شود؛ خطای شبکه → فایل نگه داشته
+        می‌شود تا اجرای بعدی دوباره تلاش کند. در پس‌زمینه صدا زده می‌شود تا
+        بوتِ سرور را کند یا بلاک نکند."""
+        if not config.GH_SESSION_PERSIST or self.gh_tools is not None:
+            return
+        token = self._gh_session_token()
+        if not token:
+            return
+        res = self._install_github(token, persist=False)
+        if res.get("ok"):
+            self.audit.append("github_session_restored", {"login": res.get("login")})
+            print(f"✅ نشست گیت‌هاب بازیابی شد ({res.get('login')}) — نیازی به ورود دوباره نیست")
+            return
+        if res.get("invalid"):
+            # ۴۰۱ از خود گیت‌هاب: توکن واقعاً باطل شده، فایل دیگر بی‌فایده است
+            try:
+                config.GH_SESSION_FILE.unlink()
+            except OSError:
+                pass
+            print("⚠️ نشست ذخیره‌شدهٔ گیت‌هاب منقضی شده بود — پاک شد؛ دوباره «ورود با مرورگر» را بزن")
+        else:
+            print("⚠️ بازیابی نشست گیت‌هاب موقتاً ممکن نشد (شبکه) — در اجرای بعدی دوباره تلاش می‌شود")
+
+    def github_logout(self) -> Dict[str, Any]:
+        """خروج از گیت‌هاب: پاک‌کردن توکن از حافظه + حذف فایل سشن + رویداد UI."""
+        was = (self.token_info or {}).get("login")
+        self.gh_tools = None
+        self.token_info = None
+        self._gh_flow = None
+        self._rebuild_registries()
+        try:
+            if config.GH_SESSION_FILE.exists():
+                config.GH_SESSION_FILE.unlink()
+        except OSError:
+            pass
+        self.audit.append("github_logout", {"login": was})
+        self.bus.emit("token_state", set=False, login=was)
+        return {"ok": True, "login": was, "message": "از گیت‌هاب خارج شدی — سشن ذخیره‌شده هم پاک شد."}
 
     # ------------------------------------------------------------------
     # ورود با مرورگر (Device Flow) — بدون ساخت هیچ کلیدی، مثل مغز دیپ‌سیک
@@ -1141,6 +1222,8 @@ class DevXHandler(BaseHTTPRequestHandler):
             self._send_json(STATE.github_login_start())
         elif path == "/api/github/poll":
             self._send_json(STATE.github_login_poll())
+        elif path == "/api/github/logout":
+            self._send_json(STATE.github_logout())
         else:
             self._send_json({"ok": False, "error": "not found"}, status=404)
 
@@ -1235,6 +1318,8 @@ def serve(open_browser: bool = True) -> ThreadingHTTPServer:
     server.daemon_threads = True
     url = f"http://{config.DEVX_HOST}:{config.DEVX_PORT}"
     print(f"🚀 DevX v4 روی {url} اجرا شد")
+    # بازیابی خودکار نشست گیت‌هاب در پس‌زمینه — شبکه نباید بوت را بلاک کند
+    threading.Thread(target=STATE.restore_github_session, name="gh-session-restore", daemon=True).start()
     if open_browser:
         try:
             webbrowser.open(url)
